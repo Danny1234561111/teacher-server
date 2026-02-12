@@ -1,0 +1,16 @@
+# Виртуальное окружение Python
+.venv/
+venv/
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# PyCharm
+.idea/
+
+# Конфиденциальные переменные
+.env
+
+# Данные Docker (томы)
+postgres_data/
