@@ -1,207 +1,267 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+# api/routes/admin.py
+from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import List, Optional
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List
 from sqlalchemy.orm import Session
 
+from services.admin_service import AdminService
 from services.auth_service import AuthService
-from services.database_service import DatabaseService
 from database.database import get_db
+from database.schema import User
 
-router = APIRouter()
-auth_service = AuthService()
-database_service = DatabaseService()
+router = APIRouter(tags=["Administration"])
 security = HTTPBearer()
+auth_service = AuthService()
+admin_service = AdminService()
 
 
-def get_admin_user(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
-    """Зависимость для получения администратора"""
+# ===== МОДЕЛИ =====
+
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=6)
+    full_name: str = Field(..., min_length=2)
+    role: str = Field(..., pattern="^(admin|teacher|student)$")
+    phone: Optional[str] = None
+    # УБРАНО: max_students: Optional[int] = 20
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    full_name: str
+    phone: Optional[str]
+    role: str
+    is_active: bool
+    # УБРАНО: max_students: Optional[int]
+
+
+class DepartmentCreate(BaseModel):
+    code: str
+    name: str
+    faculty: str
+
+
+class DepartmentResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    faculty: str
+
+
+class SpecialityCreate(BaseModel):
+    code: str
+    name: str
+    department_id: int
+
+
+class SpecialityResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    department_id: int
+
+
+class ProfileCreate(BaseModel):
+    name: str
+    speciality_id: int
+    code: Optional[str] = None
+    budget_places: Optional[int] = None
+    paid_places: Optional[int] = None
+
+
+class ProfileResponse(BaseModel):
+    id: int
+    name: str
+    code: Optional[str]
+    speciality_id: int
+    budget_places: Optional[int]
+    paid_places: Optional[int]
+
+
+class DeleteResponse(BaseModel):
+    message: str
+
+
+# ===== ПРОВЕРКА АДМИНА =====
+
+async def get_current_admin(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        db: Session = Depends(get_db)
+) -> User:
     token = credentials.credentials
-    try:
-        user = auth_service.get_current_user(token, db)
-        if user.get('role') != 'admin':
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Требуются права администратора"
-            )
-        return user
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e)
-        )
+    user_data = auth_service.get_user_by_token(token, db)
+
+    # Безопасное получение роли
+    role = user_data.get('role')
+
+    # Проверяем разные случаи
+    is_admin = False
+    if hasattr(role, 'value'):  # если это Enum
+        is_admin = role.value == 'admin'
+    else:  # если это строка
+        is_admin = role == 'admin'
+
+    if not is_admin:
+        print(f"Доступ запрещен. Роль пользователя: {role}")
+        raise HTTPException(status_code=403, detail="Требуются права администратора")
+
+    user = db.query(User).filter(User.id == user_data['id']).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    return user
 
 
-@router.get("/teacher-requests")
-async def get_teacher_requests(
-        status: Optional[str] = None,
-        admin_user: dict = Depends(get_admin_user),
-        db: Session = Depends(get_db)
-):
-    """Получение списка заявок преподавателей"""
-    try:
-        requests = auth_service.get_teacher_requests(status, db)
-        return {"requests": requests, "count": len(requests)}
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Ошибка получения заявок: {str(e)}"
-        )
+# ===== ПОЛУЧЕНИЕ СПИСКОВ (ТОЛЬКО ВСЕ) =====
 
-
-@router.post("/approve-teacher/{request_id}")
-async def approve_teacher_request(
-        request_id: str,
-        departments: Optional[List[str]] = None,
-        admin_user: dict = Depends(get_admin_user),
-        db: Session = Depends(get_db)
-):
-    """Одобрение заявки преподавателя"""
-    try:
-        result = auth_service.approve_teacher_request(
-            request_id=request_id,
-            admin_id=admin_user['id'],
-            departments=departments,
-            db=db
-        )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка одобрения заявки: {str(e)}"
-        )
-
-
-@router.post("/reject-teacher/{request_id}")
-async def reject_teacher_request(
-        request_id: str,
-        reason: str = "",
-        admin_user: dict = Depends(get_admin_user),
-        db: Session = Depends(get_db)
-):
-    """Отклонение заявки преподавателя"""
-    try:
-        result = auth_service.reject_teacher_request(
-            request_id=request_id,
-            admin_id=admin_user['id'],
-            reason=reason,
-            db=db
-        )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка отклонения заявки: {str(e)}"
-        )
-
-
-@router.get("/users")
+@router.get("/users", response_model=List[UserResponse])
 async def get_all_users(
-        role: Optional[str] = None,
-        active_only: bool = True,
-        limit: int = 100,
-        offset: int = 0,
-        admin_user: dict = Depends(get_admin_user),
+        admin: User = Depends(get_current_admin),
         db: Session = Depends(get_db)
 ):
     """Получение списка всех пользователей"""
-    try:
-        users = database_service.get_all_users(limit=limit, offset=offset)
-
-        if role:
-            users = [user for user in users if user.get('role') == role]
-        if active_only:
-            users = [user for user in users if user.get('is_active')]
-
-        return {"users": users, "count": len(users)}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка получения пользователей: {str(e)}"
-        )
+    return admin_service.get_all_users(db)
 
 
-@router.put("/users/{user_id}/activate")
-async def activate_user(
-        user_id: str,
-        admin_user: dict = Depends(get_admin_user),
+@router.get("/departments", response_model=List[DepartmentResponse])
+async def get_all_departments(
+        admin: User = Depends(get_current_admin),
         db: Session = Depends(get_db)
 ):
-    """Активация пользователя"""
-    try:
-        success = database_service.update_user(user_id, {"is_active": True})
-        if not success:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
-
-        return {"message": "Пользователь активирован"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка активации пользователя: {str(e)}"
-        )
+    """Получение списка всех факультетов"""
+    return admin_service.get_all_departments(db)
 
 
-@router.put("/users/{user_id}/deactivate")
-async def deactivate_user(
-        user_id: str,
-        admin_user: dict = Depends(get_admin_user),
+@router.get("/specialities", response_model=List[SpecialityResponse])
+async def get_all_specialities(
+        admin: User = Depends(get_current_admin),
         db: Session = Depends(get_db)
 ):
-    """Деактивация пользователя"""
-    try:
-        success = database_service.update_user(user_id, {"is_active": False})
-        if not success:
-            raise HTTPException(status_code=404, detail="Пользователь не найден")
-
-        return {"message": "Пользователь деактивирован"}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка деактивации пользователя: {str(e)}"
-        )
+    """Получение списка всех специальностей"""
+    return admin_service.get_all_specialities(db)
 
 
-@router.get("/statistics")
-async def get_admin_statistics(
-        admin_user: dict = Depends(get_admin_user),
+@router.get("/profiles", response_model=List[ProfileResponse])
+async def get_all_profiles(
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Получение списка всех профилей"""
+    return admin_service.get_all_profiles(db)
+
+
+@router.get("/stats")
+async def get_system_stats(
+        admin: User = Depends(get_current_admin),
         db: Session = Depends(get_db)
 ):
     """Получение статистики системы"""
-    try:
-        stats = database_service.get_statistics()
-        return stats
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка получения статистики: {str(e)}"
-        )
+    return admin_service.get_system_stats(db)
 
 
-@router.get("/students")
-async def get_all_students(
-        department_id: Optional[str] = None,
-        speciality_id: Optional[str] = None,
-        status: Optional[str] = None,
-        limit: int = 100,
-        offset: int = 0,
-        admin_user: dict = Depends(get_admin_user),
+# ===== ДОБАВЛЕНИЕ =====
+
+@router.post("/users", status_code=201, response_model=UserResponse)
+async def create_user(
+        data: UserCreate,
+        admin: User = Depends(get_current_admin),
         db: Session = Depends(get_db)
 ):
-    """Получение всех студентов (админ)"""
+    """Добавление пользователя"""
     try:
-        students = database_service.get_all_students_filtered(
-            department_id=department_id,
-            speciality_id=speciality_id,
-            status=status,
-            limit=limit,
-            offset=offset
-        )
-        return {"students": students, "count": len(students)}
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Ошибка получения студентов: {str(e)}"
-        )
+        return admin_service.create_user(data.dict(), db)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/departments", status_code=201, response_model=DepartmentResponse)
+async def create_department(
+        data: DepartmentCreate,
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Добавление факультета"""
+    return admin_service.create_department(data.dict(), db)
+
+
+@router.post("/specialities", status_code=201, response_model=SpecialityResponse)
+async def create_speciality(
+        data: SpecialityCreate,
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Добавление специальности"""
+    return admin_service.create_speciality(data.dict(), db)
+
+
+@router.post("/profiles", status_code=201, response_model=ProfileResponse)
+async def create_profile(
+        data: ProfileCreate,
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Добавление профиля"""
+    return admin_service.create_profile(data.dict(), db)
+
+
+# ===== УДАЛЕНИЕ =====
+
+@router.delete("/users/{user_id}", response_model=DeleteResponse)
+async def delete_user(
+        user_id: int,
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Удаление пользователя"""
+    if user_id == admin.id:
+        raise HTTPException(status_code=400, detail="Нельзя удалить самого себя")
+
+    deleted = admin_service.delete_user(user_id, db)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+    return {"message": "Пользователь удален"}
+
+
+@router.delete("/departments/{dept_id}", response_model=DeleteResponse)
+async def delete_department(
+        dept_id: int,
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Удаление факультета"""
+    deleted = admin_service.delete_department(dept_id, db)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Факультет не найден")
+
+    return {"message": "Факультет удален"}
+
+
+@router.delete("/specialities/{spec_id}", response_model=DeleteResponse)
+async def delete_speciality(
+        spec_id: int,
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Удаление специальности"""
+    deleted = admin_service.delete_speciality(spec_id, db)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Специальность не найдена")
+
+    return {"message": "Специальность удалена"}
+
+
+@router.delete("/profiles/{profile_id}", response_model=DeleteResponse)
+async def delete_profile(
+        profile_id: int,
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Удаление профиля"""
+    deleted = admin_service.delete_profile(profile_id, db)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Профиль не найден")
+
+    return {"message": "Профиль удален"}

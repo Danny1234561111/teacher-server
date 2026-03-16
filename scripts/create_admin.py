@@ -7,36 +7,31 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.database import SessionLocal
 from database.schema import User
 from services.auth_service import AuthService
-import uuid
-from datetime import datetime
 
 
-def create_admin_user(email: str, password: str, full_name: str = "Администратор"):
-    """Создание администратора через скрипт"""
+def create_admin_user(email: str = "admin@university.com",
+                      password: str = "admin123",
+                      full_name: str = "Администратор Системы этой"):
+    """Создание администратора"""
     db = SessionLocal()
+    auth_service = AuthService()
 
     try:
-        # Проверяем, существует ли уже администратор
-        existing_admin = db.query(User).filter(User.role == 'admin').first()
-        if existing_admin:
-            print(f"⚠️ Администратор уже существует: {existing_admin.email}")
+        # Проверяем, существует ли пользователь с таким email
+        existing_user = db.query(User).filter(User.email == email).first()
+        if existing_user:
+            print(f"⚠️ Пользователь {email} уже существует")
+            print(f"   ID: {existing_user.id}")
+            print(f"   Роль: {existing_user.role}")
             return
 
-        auth_service = AuthService()
-
+        # Создаем администратора - НЕ УКАЗЫВАЕМ ID!
         admin_user = User(
-            id=str(uuid.uuid4()),
             email=email,
             full_name=full_name,
-            role='admin',
-            password_hash=auth_service._hash_password(password),
-            is_active=True,
-            max_students=1000,
-            current_students_count=0,
-            assigned_departments=['all'],
-            assigned_specialities=['all'],
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            role="ADMIN",
+            hashed_password=auth_service._hash_password(password),
+            is_active=True
         )
 
         db.add(admin_user)
@@ -46,6 +41,7 @@ def create_admin_user(email: str, password: str, full_name: str = "Админи�
         print(f"   Email: {email}")
         print(f"   Пароль: {password}")
         print(f"   Имя: {full_name}")
+        print(f"   ID: {admin_user.id} (сгенерирован автоматически)")
 
     except Exception as e:
         print(f"❌ Ошибка создания администратора: {e}")
@@ -55,9 +51,12 @@ def create_admin_user(email: str, password: str, full_name: str = "Админи�
 
 
 if __name__ == "__main__":
-    # Использование по умолчанию
-    create_admin_user(
-        email="admin@university.com",
-        password="admin123",
-        full_name="Администратор Системы"
-    )
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Создание администратора')
+    parser.add_argument('--email', default='admin@university.com', help='Email администратора')
+    parser.add_argument('--password', default='admin123', help='Пароль администратора')
+    parser.add_argument('--name', default='Администратор Системы этой', help='Имя администратора')
+
+    args = parser.parse_args()
+    create_admin_user(args.email, args.password, args.name)
