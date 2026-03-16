@@ -44,24 +44,39 @@ class StudentUpdate(BaseModel):
     status: Optional[str] = None
     application_status: Optional[str] = None
     contact_status: Optional[str] = None
+    contact_type: Optional[str] = None  # ДОБАВЛЕНО
+    consent_status: Optional[bool] = None  # ДОБАВЛЕНО
     total_score: Optional[int] = None
 
 
 class StudentResponse(BaseModel):
-    """Ответ с данными абитуриента"""
+    """Ответ с данными абитуриента - ВСЕ СТАТУСЫ"""
     id: int
     russian_student_id: Optional[int]
     full_name: str
     phone: Optional[str]
+    additional_contacts: Optional[dict]  # ДОБАВЛЕНО
+    prior_contact: Optional[str]  # ДОБАВЛЕНО
+    department_id: Optional[int]  # ДОБАВЛЕНО
     department_name: Optional[str]
+    speciality_id: Optional[int]  # ДОБАВЛЕНО
     speciality_name: Optional[str]
+    profile_id: Optional[int]  # ДОБАВЛЕНО
     profile_name: Optional[str]
-    status: Optional[str]
-    application_status: Optional[str]
-    contact_status: Optional[str]
+    study_level: Optional[str]  # ДОБАВЛЕНО
+    study_form: Optional[str]  # ДОБАВЛЕНО
+    study_basis: Optional[str]  # ДОБАВЛЕНО
+    status: Optional[str]  # Общий статус (active/inactive/unknown/enrolled/withdrawn)
+    application_status: Optional[str]  # Статус заявления (pending/accepted/rejected/paid)
+    contact_status: Optional[str]  # Статус контакта (NEW/MET/INTERESTED/ORIGINAL_SUBMITTED/WAITING_ORIGINAL/NOT_INTERESTED)
+    contact_type: Optional[str]  # ДОБАВЛЕНО - Тип контакта (звонок/сообщение/личная встреча)
+    consent_status: Optional[bool]  # ДОБАВЛЕНО - Согласие на зачисление (Да/Нет)
     total_score: Optional[int]
     last_communication: Optional[datetime]
+    last_communication_note: Optional[str]  # ДОБАВЛЕНО
     kurator_id: Optional[int]
+    created_at: Optional[datetime]  # ДОБАВЛЕНО
+    updated_at: Optional[datetime]  # ДОБАВЛЕНО
 
 
 class StudentListResponse(BaseModel):
@@ -135,19 +150,25 @@ async def get_students(
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=500),
         status: Optional[str] = None,
+        application_status: Optional[str] = None,  # ДОБАВЛЕНО
+        contact_status: Optional[str] = None,  # ДОБАВЛЕНО
+        consent_status: Optional[bool] = None,  # ДОБАВЛЕНО
         department_id: Optional[int] = None,
         speciality_id: Optional[int] = None,
         search: Optional[str] = None,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Получение списка доступных абитуриентов"""
+    """Получение списка доступных абитуриентов с фильтрацией по всем статусам"""
     students = student_service.get_available_students(
         user_id=current_user.id,
         db=db,
         skip=skip,
         limit=limit,
         status=status,
+        application_status=application_status,  # ДОБАВЛЕНО
+        contact_status=contact_status,  # ДОБАВЛЕНО
+        consent_status=consent_status,  # ДОБАВЛЕНО
         department_id=department_id,
         speciality_id=speciality_id,
         search=search
@@ -165,7 +186,7 @@ async def get_student(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Получение абитуриента по ID"""
+    """Получение абитуриента по ID со всеми статусами"""
     student = student_service.get_student_by_id(
         student_id=student_id,
         user_id=current_user.id,
@@ -202,7 +223,7 @@ async def update_student(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Обновление данных абитуриента"""
+    """Обновление данных абитуриента, включая все статусы"""
     try:
         student = student_service.update_student(
             student_id=student_id,

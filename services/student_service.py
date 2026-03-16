@@ -22,6 +22,9 @@ class StudentService:
             skip: int = 0,
             limit: int = 100,
             status: Optional[str] = None,
+            application_status: Optional[str] = None,  # ДОБАВЛЕНО
+            contact_status: Optional[str] = None,  # ДОБАВЛЕНО
+            consent_status: Optional[bool] = None,  # ДОБАВЛЕНО
             department_id: Optional[int] = None,
             speciality_id: Optional[int] = None,
             search: Optional[str] = None
@@ -41,15 +44,33 @@ class StudentService:
             else:
                 query = query.filter(Student.kurator_id == user_id)
 
-        # Дополнительные фильтры
+        # Дополнительные фильтры по статусам
         if status:
-            # Преобразуем строку в Enum для фильтрации
             try:
                 status_enum = StudentStatus(status)
                 query = query.filter(Student.status == status_enum)
             except ValueError:
-                # Если статус не найден в Enum, игнорируем фильтр
                 pass
+
+        # ДОБАВЛЕНО: фильтр по application_status
+        if application_status:
+            try:
+                app_status_enum = ApplicationStatus(application_status)
+                query = query.filter(Student.application_status == app_status_enum)
+            except ValueError:
+                pass
+
+        # ДОБАВЛЕНО: фильтр по contact_status
+        if contact_status:
+            try:
+                contact_status_enum = ContactStatus(contact_status)
+                query = query.filter(Student.contact_status == contact_status_enum)
+            except ValueError:
+                pass
+
+        # ДОБАВЛЕНО: фильтр по consent_status
+        if consent_status is not None:
+            query = query.filter(Student.consent_status == consent_status)
 
         if department_id:
             query = query.filter(Student.department_id == department_id)
@@ -87,7 +108,7 @@ class StudentService:
             if existing:
                 raise ValueError("Абитуриент с таким ID уже существует")
 
-        # Создаем абитуриента - ИСПОЛЬЗУЕМ .name для получения ЗАГЛАВНЫХ значений
+        # Создаем абитуриента
         new_student = Student(
             russian_student_id=student_data.get('russian_student_id'),
             full_name=student_data['full_name'],
@@ -100,10 +121,11 @@ class StudentService:
             study_level=student_data.get('study_level'),
             study_form=student_data.get('study_form'),
             study_basis=student_data.get('study_basis'),
-            # ИСПРАВЛЕНО: используем .name для получения ЗАГЛАВНЫХ значений
-            status=StudentStatus.ACTIVE.name,  # даст 'ACTIVE'
-            application_status=ApplicationStatus.PENDING.name,  # даст 'PENDING'
-            contact_status=ContactStatus.NEW.name,  # даст 'NEW'
+            status=StudentStatus.ACTIVE.name,
+            application_status=ApplicationStatus.PENDING.name,
+            contact_status=ContactStatus.NEW.name,
+            contact_type=student_data.get('contact_type'),  # ДОБАВЛЕНО
+            consent_status=student_data.get('consent_status'),  # ДОБАВЛЕНО
             total_score=student_data.get('total_score'),
             kurator_id=user_id,
             created_at=datetime.utcnow(),
@@ -132,7 +154,7 @@ class StudentService:
         if not self._can_access_student(student, user_id, db):
             raise PermissionError("Нет доступа к этому абитуриенту")
 
-        # Обновляем поля, преобразуя строки в Enum где необходимо
+        # Обновляем поля
         for field, value in update_data.items():
             if value is None:
                 continue
@@ -143,7 +165,6 @@ class StudentService:
                     try:
                         setattr(student, field, StudentStatus(value))
                     except ValueError:
-                        # Если значение не найдено в Enum, пропускаем
                         pass
                 elif field == 'application_status' and isinstance(value, str):
                     try:
@@ -179,6 +200,14 @@ class StudentService:
                         setattr(student, field, PriorContact(value))
                     except ValueError:
                         pass
+                elif field == 'contact_type' and isinstance(value, str):
+                    from database.schema import ContactType  # ДОБАВЛЕНО
+                    try:
+                        setattr(student, field, ContactType(value))
+                    except ValueError:
+                        pass
+                elif field == 'consent_status':  # ДОБАВЛЕНО
+                    setattr(student, field, value)
                 else:
                     # Обычные поля
                     setattr(student, field, value)
@@ -190,12 +219,12 @@ class StudentService:
         return self._student_to_dict(student, db)
 
     def delete_student(self, student_id: int, user_id: int, db: Session) -> bool:
-        """Удаление абитуриента (любой, у кого есть доступ)"""
+        """Удаление абитуриента"""
         student = db.query(Student).filter(Student.id == student_id).first()
         if not student:
             return False
 
-        # Проверка доступа (любой, у кого есть доступ к студенту, может удалить)
+        # Проверка доступа
         if not self._can_access_student(student, user_id, db):
             raise PermissionError("Нет доступа к этому абитуриенту")
 
@@ -222,7 +251,7 @@ class StudentService:
         return False
 
     def _student_to_dict(self, student: Student, db: Session) -> Dict[str, Any]:
-        """Конвертация абитуриента в словарь"""
+        """Конвертация абитуриента в словарь - ВСЕ ПОЛЯ"""
         if not student:
             return None
 
@@ -236,6 +265,7 @@ class StudentService:
             Communication.student_id == student.id
         ).order_by(Communication.date_time.desc()).first()
 
+        # ДОБАВЛЕНО: все поля студента
         return {
             'id': student.id,
             'russian_student_id': student.russian_student_id,
@@ -255,6 +285,8 @@ class StudentService:
             'status': student.status.value if student.status else None,
             'application_status': student.application_status.value if student.application_status else None,
             'contact_status': student.contact_status.value if student.contact_status else None,
+            'contact_type': student.contact_type.value if student.contact_type else None,  # ДОБАВЛЕНО
+            'consent_status': student.consent_status,  # ДОБАВЛЕНО (уже boolean)
             'total_score': student.total_score,
             'last_communication': last_comm.date_time if last_comm else None,
             'last_communication_note': last_comm.notes if last_comm else None,
