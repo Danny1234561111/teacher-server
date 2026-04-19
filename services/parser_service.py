@@ -182,14 +182,10 @@ class ParserService:
         return mapping.get(status_name)
 
     def update_student(self, item: Dict) -> Optional[Student]:
-        """Обновляет данные существующего студента (НЕ создает новых)"""
         try:
-            # Проверяем, загружена ли информация о группе
             if not self.group_info:
                 logger.error("❌ Нет информации о группе")
                 return None
-
-            # ID студента может быть в разных полях
             russian_id = item.get('Идентификатор') or item.get('Абитуриент') or item.get('УникальныйКодПоступающего')
             if not russian_id:
                 logger.warning("⚠️ Нет ID абитуриента")

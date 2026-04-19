@@ -1,7 +1,6 @@
-# api/routes/students.py
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -19,6 +18,110 @@ student_service = StudentService()
 communication_service = CommunicationService()
 
 
+# ===== ENUM для валидации =====
+
+class ContactStatus(str):
+    """Допустимые статусы контакта"""
+    NEW = "NEW"
+    MET = "MET"
+    INTERESTED = "INTERESTED"
+    ORIGINAL_SUBMITTED = "ORIGINAL_SUBMITTED"
+    WAITING_ORIGINAL = "WAITING_ORIGINAL"
+    NOT_INTERESTED = "NOT_INTERESTED"
+    ENROLLED = "ENROLLED"
+    WITHDRAWN = "WITHDRAWN"
+
+    @classmethod
+    def get_valid_values(cls):
+        return [cls.NEW, cls.MET, cls.INTERESTED, cls.ORIGINAL_SUBMITTED,
+                cls.WAITING_ORIGINAL, cls.NOT_INTERESTED, cls.ENROLLED, cls.WITHDRAWN]
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        """Приводит значение к правильному формату (UPPERCASE)"""
+        if not value:
+            return value
+        value_upper = value.upper()
+        if value_upper in cls.get_valid_values():
+            return value_upper
+        # Маппинг частых ошибок
+        mapping = {
+            'STRING': cls.NEW,
+            'NEW': cls.NEW,
+            'MET': cls.MET,
+            'INTERESTED': cls.INTERESTED,
+            'ORIGINAL_SUBMITTED': cls.ORIGINAL_SUBMITTED,
+            'WAITING_ORIGINAL': cls.WAITING_ORIGINAL,
+            'NOT_INTERESTED': cls.NOT_INTERESTED,
+        }
+        return mapping.get(value_upper, value_upper)
+
+
+class CommunicationType(str):
+    """Допустимые типы коммуникаций (в БД хранятся в UPPERCASE)"""
+    CALL = "CALL"
+    MEETING = "MEETING"
+    EMAIL = "EMAIL"
+    MESSAGE = "MESSAGE"
+
+    @classmethod
+    def get_valid_values(cls):
+        return [cls.CALL, cls.MEETING, cls.EMAIL, cls.MESSAGE]
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        """Приводит значение к UPPERCASE (как в БД)"""
+        if not value:
+            return value
+        value_upper = value.upper()
+        if value_upper in cls.get_valid_values():
+            return value_upper
+        # Маппинг распространенных вариантов
+        mapping = {
+            'CALL': cls.CALL,
+            'MEETING': cls.MEETING,
+            'EMAIL': cls.EMAIL,
+            'MESSAGE': cls.MESSAGE,
+            'PHONE': cls.CALL,
+            'PHONE_CALL': cls.CALL,
+            'SMS': cls.MESSAGE,
+        }
+        return mapping.get(value_upper, value_upper)
+
+
+class CommunicationStatus(str):
+    """Допустимые статусы коммуникации"""
+    PLANNED = "planned"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    MISSED = "missed"
+
+    @classmethod
+    def get_valid_values(cls):
+        return [cls.PLANNED, cls.COMPLETED, cls.CANCELLED, cls.MISSED]
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        """Приводит значение к правильному формату (lowercase)"""
+        if not value:
+            return value
+        value_lower = value.lower()
+        if value_lower in cls.get_valid_values():
+            return value_lower
+        # Маппинг частых ошибок
+        mapping = {
+            'planned': cls.PLANNED,
+            'completed': cls.COMPLETED,
+            'cancelled': cls.CANCELLED,
+            'missed': cls.MISSED,
+            'COMPLETED': cls.COMPLETED,
+            'PLANNED': cls.PLANNED,
+            'CANCELLED': cls.CANCELLED,
+            'MISSED': cls.MISSED,
+        }
+        return mapping.get(value_lower, value_lower)
+
+
 # ===== МОДЕЛИ ДЛЯ АБИТУРИЕНТОВ =====
 
 class StudentCreate(BaseModel):
@@ -26,6 +129,13 @@ class StudentCreate(BaseModel):
     full_name: str = Field(..., min_length=2, description="ФИО абитуриента")
     russian_student_id: Optional[int] = Field(None, description="Российский ID студента (7 цифр)")
     phone: Optional[str] = Field(None, description="Номер телефона")
+
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v):
+        if not v or len(v.strip()) < 2:
+            raise ValueError('ФИО должно содержать минимум 2 символа')
+        return v.strip()
 
 
 class StudentUpdate(BaseModel):
@@ -44,9 +154,20 @@ class StudentUpdate(BaseModel):
     status: Optional[str] = None
     application_status: Optional[str] = None
     contact_status: Optional[str] = None
-    contact_type: Optional[str] = None  # ДОБАВЛЕНО
-    consent_status: Optional[bool] = None  # ДОБАВЛЕНО
+    contact_type: Optional[str] = None
+    consent_status: Optional[bool] = None
     total_score: Optional[int] = None
+
+    @field_validator('contact_status')
+    @classmethod
+    def validate_contact_status(cls, v):
+        if v:
+            normalized = ContactStatus.normalize(v)
+            if normalized not in ContactStatus.get_valid_values():
+                raise ValueError(
+                    f"Недопустимый статус контакта. Допустимые: {', '.join(ContactStatus.get_valid_values())}")
+            return normalized
+        return v
 
 
 class StudentResponse(BaseModel):
@@ -55,28 +176,31 @@ class StudentResponse(BaseModel):
     russian_student_id: Optional[int]
     full_name: str
     phone: Optional[str]
-    additional_contacts: Optional[dict]  # ДОБАВЛЕНО
-    prior_contact: Optional[str]  # ДОБАВЛЕНО
-    department_id: Optional[int]  # ДОБАВЛЕНО
+    additional_contacts: Optional[dict]
+    prior_contact: Optional[str]
+    department_id: Optional[int]
     department_name: Optional[str]
-    speciality_id: Optional[int]  # ДОБАВЛЕНО
+    speciality_id: Optional[int]
     speciality_name: Optional[str]
-    profile_id: Optional[int]  # ДОБАВЛЕНО
+    profile_id: Optional[int]
     profile_name: Optional[str]
-    study_level: Optional[str]  # ДОБАВЛЕНО
-    study_form: Optional[str]  # ДОБАВЛЕНО
-    study_basis: Optional[str]  # ДОБАВЛЕНО
-    status: Optional[str]  # Общий статус (active/inactive/unknown/enrolled/withdrawn)
-    application_status: Optional[str]  # Статус заявления (pending/accepted/rejected/paid)
-    contact_status: Optional[str]  # Статус контакта (NEW/MET/INTERESTED/ORIGINAL_SUBMITTED/WAITING_ORIGINAL/NOT_INTERESTED)
-    contact_type: Optional[str]  # ДОБАВЛЕНО - Тип контакта (звонок/сообщение/личная встреча)
-    consent_status: Optional[bool]  # ДОБАВЛЕНО - Согласие на зачисление (Да/Нет)
+    study_level: Optional[str]
+    study_form: Optional[str]
+    study_basis: Optional[str]
+    status: Optional[str]
+    application_status: Optional[str]
+    contact_status: Optional[str]
+    contact_type: Optional[str]
+    consent_status: Optional[bool]
     total_score: Optional[int]
     last_communication: Optional[datetime]
-    last_communication_note: Optional[str]  # ДОБАВЛЕНО
+    last_communication_note: Optional[str]
     kurator_id: Optional[int]
-    created_at: Optional[datetime]  # ДОБАВЛЕНО
-    updated_at: Optional[datetime]  # ДОБАВЛЕНО
+    created_at: Optional[datetime]
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
 
 
 class StudentListResponse(BaseModel):
@@ -88,21 +212,78 @@ class StudentListResponse(BaseModel):
 
 class CommunicationCreate(BaseModel):
     """Создание записи о коммуникации"""
-    communication_type: str = Field(..., pattern="^(call|meeting|email|message)$")
-    status: Optional[str] = "completed"
-    date_time: Optional[datetime] = None
-    duration_minutes: Optional[int] = None
-    notes: Optional[str] = None
-    contact_status: Optional[str] = None  # Новый статус контакта для студента
+    communication_type: str = Field(..., description="Тип коммуникации")
+    status: Optional[str] = Field("completed", description="Статус коммуникации")
+    date_time: Optional[datetime] = Field(None, description="Дата и время")
+    duration_minutes: Optional[int] = Field(None, ge=1, le=480, description="Длительность в минутах")
+    notes: Optional[str] = Field(None, max_length=2000, description="Заметки")
+    contact_status: Optional[str] = Field(None, description="Новый статус контакта для студента")
+
+    @field_validator('communication_type')
+    @classmethod
+    def validate_communication_type(cls, v):
+        if v:
+            normalized = CommunicationType.normalize(v)
+            if normalized not in CommunicationType.get_valid_values():
+                raise ValueError(
+                    f"Недопустимый тип коммуникации: {v}. "
+                    f"Допустимые: {', '.join([t.lower() for t in CommunicationType.get_valid_values()])}"
+                )
+            return normalized
+        return v
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        if v:
+            normalized = CommunicationStatus.normalize(v)
+            if normalized not in CommunicationStatus.get_valid_values():
+                raise ValueError(
+                    f"Недопустимый статус. Допустимые: {', '.join(CommunicationStatus.get_valid_values())}")
+            return normalized
+        return 'completed'
+
+    @field_validator('contact_status')
+    @classmethod
+    def validate_contact_status(cls, v):
+        if v:
+            normalized = ContactStatus.normalize(v)
+            if normalized not in ContactStatus.get_valid_values():
+                raise ValueError(f"Недопустимый статус контакта: {v}. "
+                               f"Допустимые: {', '.join(ContactStatus.get_valid_values())}")
+            return normalized
+        return v
 
 
 class CommunicationUpdate(BaseModel):
     """Обновление записи о коммуникации"""
-    communication_type: Optional[str] = Field(None, pattern="^(call|meeting|email|message)$")
+    communication_type: Optional[str] = None
     status: Optional[str] = None
     date_time: Optional[datetime] = None
-    duration_minutes: Optional[int] = None
-    notes: Optional[str] = None
+    duration_minutes: Optional[int] = Field(None, ge=1, le=480)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+    @field_validator('communication_type')
+    @classmethod
+    def validate_communication_type(cls, v):
+        if v:
+            normalized = CommunicationType.normalize(v)
+            if normalized not in CommunicationType.get_valid_values():
+                raise ValueError(
+                    f"Недопустимый тип коммуникации. Допустимые: {', '.join([t.lower() for t in CommunicationType.get_valid_values()])}")
+            return normalized
+        return v
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        if v:
+            normalized = CommunicationStatus.normalize(v)
+            if normalized not in CommunicationStatus.get_valid_values():
+                raise ValueError(
+                    f"Недопустимый статус. Допустимые: {', '.join(CommunicationStatus.get_valid_values())}")
+            return normalized
+        return v
 
 
 class CommunicationResponse(BaseModel):
@@ -115,14 +296,19 @@ class CommunicationResponse(BaseModel):
     date_time: datetime
     duration_minutes: Optional[int]
     notes: Optional[str]
+    contact_status: Optional[str]
     created_by_name: Optional[str]
     created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class CommunicationStatsResponse(BaseModel):
     """Статистика по коммуникациям"""
     total_communications: int
     by_type: dict
+    contact_status_distribution: Optional[dict] = {}
     recent_communications: List[CommunicationResponse]
     period_days: int
 
@@ -150,9 +336,9 @@ async def get_students(
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=500),
         status: Optional[str] = None,
-        application_status: Optional[str] = None,  # ДОБАВЛЕНО
-        contact_status: Optional[str] = None,  # ДОБАВЛЕНО
-        consent_status: Optional[bool] = None,  # ДОБАВЛЕНО
+        application_status: Optional[str] = None,
+        contact_status: Optional[str] = None,
+        consent_status: Optional[bool] = None,
         department_id: Optional[int] = None,
         speciality_id: Optional[int] = None,
         search: Optional[str] = None,
@@ -166,9 +352,9 @@ async def get_students(
         skip=skip,
         limit=limit,
         status=status,
-        application_status=application_status,  # ДОБАВЛЕНО
-        contact_status=contact_status,  # ДОБАВЛЕНО
-        consent_status=consent_status,  # ДОБАВЛЕНО
+        application_status=application_status,
+        contact_status=contact_status,
+        consent_status=consent_status,
         department_id=department_id,
         speciality_id=speciality_id,
         search=search
@@ -317,11 +503,12 @@ async def create_student_communication(
         full_data = comm_data.dict(exclude_unset=True)
         full_data['student_id'] = student_id
 
-        return communication_service.create_communication(
+        result = communication_service.create_communication(
             communication_data=full_data,
             user_id=current_user.id,
             db=db
         )
+        return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except PermissionError as e:
