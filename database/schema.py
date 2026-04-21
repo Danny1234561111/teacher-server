@@ -86,11 +86,10 @@ class Department(Base):
     __tablename__ = "departments"
 
     id = Column(Integer, primary_key=True, index=True)
-    code = Column(String, unique=True, nullable=False)  # Код направления
-    name = Column(String, nullable=False)  # Название
-    faculty = Column(String, nullable=False)  # Факультет
+    code = Column(String, unique=True, nullable=False)
+    name = Column(String, nullable=False)
+    faculty = Column(String, nullable=False)
 
-    # Связи
     specialities = relationship("Speciality", back_populates="department", cascade="all, delete-orphan")
     students = relationship("Student", back_populates="department")
 
@@ -100,11 +99,10 @@ class Speciality(Base):
     __tablename__ = "specialities"
 
     id = Column(Integer, primary_key=True, index=True)
-    code = Column(String, unique=True, nullable=False)  # Код специальности
-    name = Column(String, nullable=False)  # Название
-    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)  # ID направления
+    code = Column(String, unique=True, nullable=False)
+    name = Column(String, nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
 
-    # Связи
     department = relationship("Department", back_populates="specialities")
     profiles = relationship("Profile", back_populates="speciality", cascade="all, delete-orphan")
     students = relationship("Student", back_populates="speciality")
@@ -115,25 +113,23 @@ class Profile(Base):
     __tablename__ = "profiles"
 
     id = Column(Integer, primary_key=True, index=True)
-    code = Column(String, nullable=True)  # Код профиля (может отсутствовать)
-    name = Column(String, nullable=False)  # Название профиля/программы
-    description = Column(Text, nullable=True)  # Описание профиля
-    speciality_id = Column(Integer, ForeignKey("specialities.id"), nullable=False)  # ID специальности
+    code = Column(String, nullable=True)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    speciality_id = Column(Integer, ForeignKey("specialities.id"), nullable=False)
 
-    # Дополнительные поля для профиля
-    study_level = Column(Enum(StudyLevel), nullable=True)  # Уровень подготовки (может отличаться от специальности)
-    study_form = Column(Enum(StudyForm), nullable=True)  # Форма обучения
-    study_basis = Column(Enum(StudyBasis), nullable=True)  # Основание
-    budget_places = Column(Integer, nullable=True)  # Количество бюджетных мест
-    paid_places = Column(Integer, nullable=True)  # Количество платных мест
-    target_places = Column(Integer, nullable=True)  # Количество целевых мест
-    passing_score = Column(Integer, nullable=True)  # Проходной балл прошлого года
-    entrance_tests = Column(JSON, nullable=True)  # Вступительные испытания (JSON массив)
+    study_level = Column(Enum(StudyLevel), nullable=True)
+    study_form = Column(Enum(StudyForm), nullable=True)
+    study_basis = Column(Enum(StudyBasis), nullable=True)
+    budget_places = Column(Integer, nullable=True)
+    paid_places = Column(Integer, nullable=True)
+    target_places = Column(Integer, nullable=True)
+    passing_score = Column(Integer, nullable=True)
+    entrance_tests = Column(JSON, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Связи
     speciality = relationship("Speciality", back_populates="profiles")
     students = relationship("Student", back_populates="profile")
 
@@ -142,50 +138,41 @@ class Profile(Base):
 class Student(Base):
     __tablename__ = "students"
 
-    # ИДЕНТИФИКАЦИЯ
     id = Column(Integer, primary_key=True, index=True)
-    russian_student_id = Column(Integer, nullable=True)  # Российский ID студента (7 цифр)
+    russian_student_id = Column(Integer, nullable=True)
+    full_name = Column(String, nullable=False)
+    phone = Column(String, nullable=True)
+    additional_contacts = Column(JSON, nullable=True)
+    prior_contact = Column(Enum(PriorContact), nullable=True)
 
-    # ЛИЧНЫЕ ДАННЫЕ
-    full_name = Column(String, nullable=False)  # ФИО полностью
-    phone = Column(String, nullable=True)  # Телефон
-    additional_contacts = Column(JSON, nullable=True)  # Доп. контакты (JSON массив)
-    prior_contact = Column(Enum(PriorContact), nullable=True)  # Приоритетная форма контакта
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    speciality_id = Column(Integer, ForeignKey("specialities.id"), nullable=True)
+    profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=True)
+    study_level = Column(Enum(StudyLevel), nullable=True)
+    study_form = Column(Enum(StudyForm), nullable=True)
+    study_basis = Column(Enum(StudyBasis), nullable=True)
 
-    # КОНКУРСНАЯ ГРУППА (контекст заявки)
-    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)  # ID факультета/направления
-    speciality_id = Column(Integer, ForeignKey("specialities.id"), nullable=True)  # ID специальности
-    profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=True)  # ID профиля/программы
-    study_level = Column(Enum(StudyLevel), nullable=True)  # Уровень подготовки
-    study_form = Column(Enum(StudyForm), nullable=True)  # Форма обучения
-    study_basis = Column(Enum(StudyBasis), nullable=True)  # Основание
+    position = Column(Integer, nullable=True)
+    priority = Column(Integer, nullable=True)
+    is_main_contest = Column(Boolean, nullable=True)
+    participation = Column(Boolean, default=True)
+    main_contest_other = Column(String, nullable=True)
+    higher_priority_other = Column(String, nullable=True)
 
-    # ПОЗИЦИИ В КОНКУРСЕ
-    position = Column(Integer, nullable=True)  # № п/п в списке
-    priority = Column(Integer, nullable=True)  # Приоритет (1…)
-    is_main_contest = Column(Boolean, nullable=True)  # Основной конкурс (Да/Нет)
-    participation = Column(Boolean, default=True)  # Участие в конкурсе (Да/Нет)
-    main_contest_other = Column(String, nullable=True)  # Основной в другой КГ
-    higher_priority_other = Column(String, nullable=True)  # Высший в другой КГ
+    status = Column(Enum(StudentStatus), default=StudentStatus.ACTIVE)
+    application_status = Column(Enum(ApplicationStatus), default=ApplicationStatus.PENDING)
+    contact_status = Column(Enum(ContactStatus), default=ContactStatus.NEW)
+    contact_type = Column(Enum(ContactType), nullable=True)
+    consent_status = Column(Boolean, nullable=True)
 
-    # СТАТУСЫ
-    status = Column(Enum(StudentStatus), default=StudentStatus.ACTIVE)  # Общий статус
-    application_status = Column(Enum(ApplicationStatus), default=ApplicationStatus.PENDING)  # Статус заявления
-    contact_status = Column(Enum(ContactStatus), default=ContactStatus.NEW)  # Статус контакта
-    contact_type = Column(Enum(ContactType), nullable=True)  # Тип контакта
-    consent_status = Column(Boolean, nullable=True)  # Согласие на зачисление (Да/Нет)
+    total_score = Column(Integer, nullable=True)
+    last_communication_date = Column(DateTime, nullable=True)
 
-    # БАЛЛЫ
-    total_score = Column(Integer, nullable=True)  # Сумма баллов (ИТОГ)
-    last_communication_date = Column(DateTime, nullable=True)  # Последняя коммуникация
-
-    # СЛУЖЕБНЫЕ
-    imported_at = Column(DateTime, nullable=True)  # Дата импорта из ИГУ
+    imported_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    kurator_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # ID куратора
+    kurator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    # Связи
     communications = relationship("Communication", back_populates="student", cascade="all, delete-orphan")
     kurator = relationship("User", foreign_keys=[kurator_id], back_populates="kurator_students")
     department = relationship("Department", foreign_keys=[department_id], back_populates="students")
@@ -193,24 +180,27 @@ class Student(Base):
     profile = relationship("Profile", foreign_keys=[profile_id], back_populates="students")
 
 
-# Модель User (Пользователи)
+# Модель User (Пользователи) - ДОБАВЛЕНЫ ПОЛЯ ДЛЯ АКТИВНОГО КОНТАКТА
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True, nullable=False)  # Email пользователя
-    full_name = Column(String, nullable=False)  # Полное имя
-    phone = Column(String, nullable=True)  # Телефон
-    role = Column(Enum(UserRole), default=UserRole.TEACHER)  # Роль (teacher/admin)
-    hashed_password = Column(String, nullable=False)  # Хешированный пароль
-    is_active = Column(Boolean, default=True)  # Активен/неактивен
+    email = Column(String, unique=True, index=True, nullable=False)
+    full_name = Column(String, nullable=False)
+    phone = Column(String, nullable=True)
+    role = Column(Enum(UserRole), default=UserRole.TEACHER)
+    hashed_password = Column(String, nullable=False)
+    is_active = Column(Boolean, default=True)
 
-    # Назначенные направления и специальности
-    assigned_departments = Column(JSON, default=list)  # ID направлений (JSON массив)
-    assigned_specialities = Column(JSON, default=list)  # ID специальностей (JSON массив)
-    assigned_profiles = Column(JSON, default=list)  # ID профилей (JSON массив)
+    assigned_departments = Column(JSON, default=list)
+    assigned_specialities = Column(JSON, default=list)
+    assigned_profiles = Column(JSON, default=list)
 
-    # Связи
+    # НОВЫЕ ПОЛЯ ДЛЯ АКТИВНОГО КОНТАКТА
+    active_contact = Column(String(255), nullable=True)
+    active_contact_type = Column(String(50), nullable=True)
+    active_contact_updated_at = Column(DateTime, nullable=True)
+
     created_communications = relationship("Communication", foreign_keys="Communication.created_by",
                                           back_populates="creator")
     kurator_students = relationship("Student", foreign_keys="Student.kurator_id", back_populates="kurator")
@@ -223,16 +213,15 @@ class Communication(Base):
     __tablename__ = "communications"
 
     id = Column(Integer, primary_key=True, index=True)
-    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)  # ID студента
-    communication_type = Column(Enum(CommunicationType), nullable=False)  # Тип
-    status = Column(Enum(CommunicationStatus), default=CommunicationStatus.COMPLETED)  # Статус
-    date_time = Column(DateTime, nullable=False)  # Дата и время
-    duration_minutes = Column(Integer, nullable=True)  # Длительность в минутах
-    notes = Column(Text, nullable=True)  # Заметки
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)  # ID создателя
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    communication_type = Column(Enum(CommunicationType), nullable=False)
+    status = Column(Enum(CommunicationStatus), default=CommunicationStatus.COMPLETED)
+    date_time = Column(DateTime, nullable=False)
+    duration_minutes = Column(Integer, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    # Связи
     student = relationship("Student", back_populates="communications")
     creator = relationship("User", foreign_keys=[created_by], back_populates="created_communications")
 
@@ -246,10 +235,9 @@ class Notification(Base):
     message = Column(Text, nullable=False)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-    type = Column(String, nullable=True)  # Тип уведомления
-    link = Column(String, nullable=True)  # Ссылка для перехода
+    type = Column(String, nullable=True)
+    link = Column(String, nullable=True)
 
-    # Связи
     teacher = relationship("User", back_populates="notifications")
 
 
@@ -264,5 +252,4 @@ class RefreshToken(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     revoked = Column(Boolean, default=False)
 
-    # Связи
     user = relationship("User", back_populates="refresh_tokens")

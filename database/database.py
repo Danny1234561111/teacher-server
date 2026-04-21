@@ -1,5 +1,5 @@
 # database/database.py
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker, Session
 import os
 from typing import Generator
@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 import socket
 from urllib.parse import urlparse
 
-# Импортируем Base здесь чтобы избежать циклических импортов
 from .schema import Base
 
 # Загрузка переменных окружения
@@ -37,7 +36,6 @@ if not DATABASE_URL:
     print(f"   POSTGRES_PORT: {DB_PORT}")
     print(f"   POSTGRES_DB: {DB_NAME}")
 
-    # Преобразование localhost для Windows
     if DB_HOST == "localhost":
         try:
             DB_HOST = socket.gethostbyname('localhost')
@@ -70,31 +68,30 @@ try:
 except Exception as e:
     print(f"   ❌ Ошибка разбора URL: {e}")
 
-print(f"📦 Финальный DATABASE_URL: {DATABASE_URL.replace(DB_PASSWORD, '***') if 'DB_PASSWORD' in locals() else DATABASE_URL}")
+print(
+    f"📦 Финальный DATABASE_URL: {DATABASE_URL.replace(DB_PASSWORD, '***') if 'DB_PASSWORD' in locals() else DATABASE_URL}")
 
-# Создание движка SQLAlchemy с подробными настройками
+# Создание движка SQLAlchemy
 try:
     engine = create_engine(
         DATABASE_URL,
-        pool_pre_ping=True,        # Проверка соединения перед использованием
-        pool_recycle=300,          # Пересоздание соединений каждые 300 секунд
-        pool_size=10,              # Максимум 10 соединений в пуле
-        max_overflow=20,           # Дополнительно 20 соединений при нагрузке
-        echo_pool=True,            # Логирование пула соединений
-        # Параметры для Windows и лучшей совместимости
+        pool_pre_ping=True,
+        pool_recycle=300,
+        pool_size=10,
+        max_overflow=20,
+        echo_pool=True,
         connect_args={
-            "connect_timeout": 10,        # Таймаут подключения 10 секунд
+            "connect_timeout": 10,
             "application_name": "university_admissions_app",
-            "keepalives": 1,              # Включить keepalive
-            "keepalives_idle": 30,        # 30 секунд бездействия
-            "keepalives_interval": 10,    # Интервал проверки 10 секунд
-            "keepalives_count": 5,        # Количество попыток
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 5,
         }
     )
     print("✅ Движок SQLAlchemy создан успешно")
 except Exception as e:
     print(f"❌ Ошибка создания движка SQLAlchemy: {e}")
-    print("   Проверьте формат DATABASE_URL")
     raise
 
 # Создание фабрики сессий
@@ -102,7 +99,7 @@ SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=engine,
-    expire_on_commit=False  # Не истекать после коммита (лучше для FastAPI)
+    expire_on_commit=False
 )
 
 print(f"✅ Фабрика сессий создана")
@@ -114,17 +111,14 @@ def init_db():
     print("🔄 Начало создания таблиц...")
 
     try:
-        # Создаем все таблицы из моделей
         Base.metadata.create_all(bind=engine)
         print("✅ Таблицы базы данных созданы успешно")
 
-        # Проверяем соединение и версию PostgreSQL
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version()"))
             version = result.fetchone()[0]
             print(f"✅ Подключено к PostgreSQL: {version}")
 
-            # Проверяем существующие таблицы
             result = conn.execute(text("""
                 SELECT table_name 
                 FROM information_schema.tables 
@@ -135,30 +129,56 @@ def init_db():
 
     except Exception as e:
         print(f"❌ Ошибка при создании таблиц: {e}")
-        print("\n🔍 ДИАГНОСТИКА:")
-        print(f"   DATABASE_URL: {DATABASE_URL.replace(DB_PASSWORD, '***') if 'DB_PASSWORD' in locals() else DATABASE_URL}")
-
-        # Проверяем доступность хоста и порта
-        import subprocess
-        try:
-            # Проверяем доступность порта
-            result = subprocess.run(
-                ["netstat", "-an", "|", "findstr", ":5432"],
-                capture_output=True,
-                text=True,
-                shell=True
-            )
-            if "5432" in result.stdout:
-                print("   ✅ Порт 5432 прослушивается")
-            else:
-                print("   ❌ Порт 5432 не прослушивается")
-        except:
-            pass
-
-        print("⚠️  Продолжаем без инициализации БД...")
         return False
 
     return True
+
+
+def ensure_schema_up_to_date():
+    """Проверяет и добавляет отсутствующие колонки в таблицу users"""
+    print("🔄 Проверка схемы базы данных...")
+
+    try:
+        inspector = inspect(engine)
+
+        if 'users' not in inspector.get_table_names():
+            print("⚠️ Таблица users не найдена")
+            return
+
+        existing_columns = [col['name'] for col in inspector.get_columns('users')]
+
+        # Добавляем active_contact если нет
+        if 'active_contact' not in existing_columns:
+            print("➕ Добавление поля active_contact...")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN active_contact VARCHAR(255) NULL"))
+                conn.commit()
+            print("✅ Поле active_contact добавлено")
+        else:
+            print("✅ Поле active_contact уже существует")
+
+        # Добавляем active_contact_type если нет
+        if 'active_contact_type' not in existing_columns:
+            print("➕ Добавление поля active_contact_type...")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN active_contact_type VARCHAR(50) NULL"))
+                conn.commit()
+            print("✅ Поле active_contact_type добавлено")
+        else:
+            print("✅ Поле active_contact_type уже существует")
+
+        # Добавляем active_contact_updated_at если нет
+        if 'active_contact_updated_at' not in existing_columns:
+            print("➕ Добавление поля active_contact_updated_at...")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE users ADD COLUMN active_contact_updated_at TIMESTAMP NULL"))
+                conn.commit()
+            print("✅ Поле active_contact_updated_at добавлено")
+        else:
+            print("✅ Поле active_contact_updated_at уже существует")
+
+    except Exception as e:
+        print(f"⚠️ Ошибка при обновлении схемы: {e}")
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -176,7 +196,6 @@ def check_connection() -> bool:
 
     try:
         with engine.connect() as conn:
-            # Простой запрос для проверки
             result = conn.execute(text("SELECT 1"))
             data = result.fetchone()
             if data and data[0] == 1:
@@ -188,11 +207,9 @@ def check_connection() -> bool:
     except Exception as e:
         print(f"❌ Ошибка подключения к базе данных: {e}")
 
-        # Подробная информация об ошибке
         if "password authentication failed" in str(e):
             print("   🔐 ОШИБКА АУТЕНТИФИКАЦИИ:")
             print("   Проверьте пароль в .env файле")
-            print("   Должен совпадать с POSTGRES_PASSWORD в docker-compose.yml")
         elif "Connection refused" in str(e):
             print("   🔌 ОШИБКА ПОДКЛЮЧЕНИЯ:")
             print("   Проверьте что PostgreSQL запущен")
@@ -200,13 +217,11 @@ def check_connection() -> bool:
         elif "could not translate host name" in str(e):
             print("   🌐 ОШИБКА ХОСТА:")
             print("   Проверьте POSTGRES_HOST в .env")
-            print("   Для Windows попробуйте: localhost, 127.0.0.1 или host.docker.internal")
 
-        print(f"   URL: {DATABASE_URL.replace(DB_PASSWORD, '***') if 'DB_PASSWORD' in locals() else DATABASE_URL}")
         return False
 
 
-# Автоматическая проверка при импорте (только для отладки)
+# Автоматическая проверка при импорте
 if __name__ != "__main__":
     print("🔧 АВТОМАТИЧЕСКАЯ ПРОВЕРКА ПРИ ИМПОРТЕ")
     connection_ok = check_connection()
@@ -216,27 +231,24 @@ if __name__ != "__main__":
         try:
             init_db()
             print("✅ Автоматическая инициализация завершена")
+            ensure_schema_up_to_date()
         except Exception as e:
-            print(f"⚠️  Ошибка при автоматической инициализации: {e}")
-            print("⚠️  Продолжаем без инициализации БД...")
+            print(f"⚠️ Ошибка при автоматической инициализации: {e}")
     else:
-        print("⚠️  Невозможно подключиться к БД, пропускаем инициализацию")
+        print("⚠️ Невозможно подключиться к БД, пропускаем инициализацию")
 
     print("=" * 50)
 
-
-# Тестовая функция для запуска из командной строки
 if __name__ == "__main__":
     print("🧪 ТЕСТОВЫЙ РЕЖИМ database.py")
     print("=" * 50)
 
     if check_connection():
         print("\n✅ Тест подключения пройден успешно!")
-
-        # Спросим пользователя, создавать ли таблицы
         response = input("\nСоздать таблицы? (y/n): ")
         if response.lower() == 'y':
             init_db()
+            ensure_schema_up_to_date()
     else:
         print("\n❌ Тест подключения не пройден")
 

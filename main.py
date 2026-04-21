@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 # Импортируем роутеры
-from routers import auth, admin,students
+from routers import auth, admin,students,user_contact
 from database.database import init_db
 from services.scheduler import scheduler
 
@@ -63,6 +63,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(students.router, prefix="/api/students", tags=["Administration"])
+app.include_router(user_contact.router)
 
 
 @app.get("/")
