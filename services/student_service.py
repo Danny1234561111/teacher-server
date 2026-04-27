@@ -5,7 +5,8 @@ from datetime import datetime
 
 from database.schema import (
     Student, User, Communication, Department, Speciality, Profile,
-    StudentStatus, ApplicationStatus, ContactStatus
+    StudentStatus, ApplicationStatus, ContactStatus, PriorContact, ContactType,
+    StudyLevel, StudyForm, StudyBasis
 )
 
 
@@ -22,9 +23,9 @@ class StudentService:
             skip: int = 0,
             limit: int = 100,
             status: Optional[str] = None,
-            application_status: Optional[str] = None,  # ДОБАВЛЕНО
-            contact_status: Optional[str] = None,  # ДОБАВЛЕНО
-            consent_status: Optional[bool] = None,  # ДОБАВЛЕНО
+            application_status: Optional[str] = None,
+            contact_status: Optional[str] = None,
+            consent_status: Optional[bool] = None,
             department_id: Optional[int] = None,
             speciality_id: Optional[int] = None,
             search: Optional[str] = None
@@ -52,7 +53,6 @@ class StudentService:
             except ValueError:
                 pass
 
-        # ДОБАВЛЕНО: фильтр по application_status
         if application_status:
             try:
                 app_status_enum = ApplicationStatus(application_status)
@@ -60,7 +60,6 @@ class StudentService:
             except ValueError:
                 pass
 
-        # ДОБАВЛЕНО: фильтр по contact_status
         if contact_status:
             try:
                 contact_status_enum = ContactStatus(contact_status)
@@ -68,7 +67,6 @@ class StudentService:
             except ValueError:
                 pass
 
-        # ДОБАВЛЕНО: фильтр по consent_status
         if consent_status is not None:
             query = query.filter(Student.consent_status == consent_status)
 
@@ -114,18 +112,18 @@ class StudentService:
             full_name=student_data['full_name'],
             phone=student_data.get('phone'),
             additional_contacts=student_data.get('additional_contacts'),
-            prior_contact=student_data.get('prior_contact'),
+            prior_contact=PriorContact(student_data['prior_contact']) if student_data.get('prior_contact') else None,
             department_id=student_data.get('department_id'),
             speciality_id=student_data.get('speciality_id'),
             profile_id=student_data.get('profile_id'),
-            study_level=student_data.get('study_level'),
-            study_form=student_data.get('study_form'),
-            study_basis=student_data.get('study_basis'),
-            status=StudentStatus.ACTIVE.name,
-            application_status=ApplicationStatus.PENDING.name,
-            contact_status=ContactStatus.NEW.name,
-            contact_type=student_data.get('contact_type'),  # ДОБАВЛЕНО
-            consent_status=student_data.get('consent_status'),  # ДОБАВЛЕНО
+            study_level=StudyLevel(student_data['study_level']) if student_data.get('study_level') else None,
+            study_form=StudyForm(student_data['study_form']) if student_data.get('study_form') else None,
+            study_basis=StudyBasis(student_data['study_basis']) if student_data.get('study_basis') else None,
+            status=StudentStatus.ACTIVE,
+            application_status=ApplicationStatus.PENDING,
+            contact_status=ContactStatus.NEW,
+            contact_type=ContactType(student_data['contact_type']) if student_data.get('contact_type') else None,
+            consent_status=student_data.get('consent_status'),
             total_score=student_data.get('total_score'),
             kurator_id=user_id,
             created_at=datetime.utcnow(),
@@ -160,8 +158,20 @@ class StudentService:
                 continue
 
             if hasattr(student, field):
-                # Для Enum полей преобразуем строку в соответствующий Enum
-                if field == 'status' and isinstance(value, str):
+                # Обработка поля prior_contact (ВАЖНО!)
+                if field == 'prior_contact' and isinstance(value, str):
+                    if value:
+                        try:
+                            setattr(student, field, PriorContact(value))
+                            print(f"✅ Обновлен prior_contact: {value} -> {PriorContact(value)}")
+                        except ValueError as e:
+                            print(f"⚠️ Ошибка при обновлении prior_contact: {value} - {e}")
+                    else:
+                        setattr(student, field, None)
+                        print(f"✅ prior_contact установлен в None")
+
+                # Обработка полей с Enum
+                elif field == 'status' and isinstance(value, str):
                     try:
                         setattr(student, field, StudentStatus(value))
                     except ValueError:
@@ -176,37 +186,27 @@ class StudentService:
                         setattr(student, field, ContactStatus(value))
                     except ValueError:
                         pass
+                elif field == 'contact_type' and isinstance(value, str):
+                    try:
+                        setattr(student, field, ContactType(value))
+                    except ValueError:
+                        pass
                 elif field == 'study_level' and isinstance(value, str):
-                    from database.schema import StudyLevel
                     try:
                         setattr(student, field, StudyLevel(value))
                     except ValueError:
                         pass
                 elif field == 'study_form' and isinstance(value, str):
-                    from database.schema import StudyForm
                     try:
                         setattr(student, field, StudyForm(value))
                     except ValueError:
                         pass
                 elif field == 'study_basis' and isinstance(value, str):
-                    from database.schema import StudyBasis
                     try:
                         setattr(student, field, StudyBasis(value))
                     except ValueError:
                         pass
-                elif field == 'prior_contact' and isinstance(value, str):
-                    from database.schema import PriorContact
-                    try:
-                        setattr(student, field, PriorContact(value))
-                    except ValueError:
-                        pass
-                elif field == 'contact_type' and isinstance(value, str):
-                    from database.schema import ContactType  # ДОБАВЛЕНО
-                    try:
-                        setattr(student, field, ContactType(value))
-                    except ValueError:
-                        pass
-                elif field == 'consent_status':  # ДОБАВЛЕНО
+                elif field == 'consent_status':
                     setattr(student, field, value)
                 else:
                     # Обычные поля
@@ -265,7 +265,6 @@ class StudentService:
             Communication.student_id == student.id
         ).order_by(Communication.date_time.desc()).first()
 
-        # ДОБАВЛЕНО: все поля студента
         return {
             'id': student.id,
             'russian_student_id': student.russian_student_id,
@@ -285,8 +284,8 @@ class StudentService:
             'status': student.status.value if student.status else None,
             'application_status': student.application_status.value if student.application_status else None,
             'contact_status': student.contact_status.value if student.contact_status else None,
-            'contact_type': student.contact_type.value if student.contact_type else None,  # ДОБАВЛЕНО
-            'consent_status': student.consent_status,  # ДОБАВЛЕНО (уже boolean)
+            'contact_type': student.contact_type.value if student.contact_type else None,
+            'consent_status': student.consent_status,
             'total_score': student.total_score,
             'last_communication': last_comm.date_time if last_comm else None,
             'last_communication_note': last_comm.notes if last_comm else None,
