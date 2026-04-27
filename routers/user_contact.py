@@ -50,7 +50,7 @@ async def set_active_contact(
 ):
     """Установить активный контакт для пользователя"""
 
-    valid_types = ['telegram', 'whatsapp', 'sms', 'call']
+    valid_types = ['telegram', 'whatsapp', 'sms', 'call','other']
     if contact_data.contact_type not in valid_types:
         raise HTTPException(
             status_code=400,
