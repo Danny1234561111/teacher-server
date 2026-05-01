@@ -1,9 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
+import re
 
 from database.database import get_db
 from database.schema import User
@@ -15,8 +16,39 @@ auth_service = AuthService()
 
 
 class ActiveContactUpdate(BaseModel):
-    contact_type: str = Field(..., description="Тип контакта: telegram, whatsapp, sms, call")
-    contact_value: str = Field(..., description="Значение контакта: @username или +79991234567")
+    contact_type: str = Field(..., description="Тип контакта: telegram, sms, call, url, other")
+    contact_value: str = Field(..., description="Значение контакта: @username, +79991234567, https://...")
+
+    @validator('contact_value')
+    def validate_contact_value(cls, v, values):
+        contact_type = values.get('contact_type')
+
+        if contact_type == 'url':
+            # Валидация URL
+            url_pattern = re.compile(
+                r'^https?://'  # http:// или https://
+                r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # домен...
+                r'localhost|'  # localhost...
+                r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...или ip
+                r'(?::\d+)?'  # опциональный порт
+                r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+
+            if not url_pattern.match(v):
+                raise ValueError('Неверный формат URL')
+
+        elif contact_type == 'telegram':
+            # Валидация Telegram username
+            if not v.startswith('@'):
+                raise ValueError('Telegram username должен начинаться с @')
+
+        elif contact_type in ['sms', 'call']:
+            # Валидация телефона
+            phone_pattern = re.compile(r'^\+?[1-9]\d{10,14}$')
+            cleaned = re.sub(r'[\s\-\(\)]', '', v)
+            if not phone_pattern.match(cleaned):
+                raise ValueError('Неверный формат номера телефона')
+
+        return v
 
 
 class ActiveContactResponse(BaseModel):
@@ -50,7 +82,7 @@ async def set_active_contact(
 ):
     """Установить активный контакт для пользователя"""
 
-    valid_types = ['telegram', 'whatsapp', 'sms', 'call','other']
+    valid_types = ['telegram', 'sms', 'call', 'url', 'other']
     if contact_data.contact_type not in valid_types:
         raise HTTPException(
             status_code=400,
@@ -62,6 +94,7 @@ async def set_active_contact(
     current_user.active_contact_updated_at = datetime.utcnow()
 
     db.commit()
+    db.refresh(current_user)
 
     return ActiveContactResponse(
         contact_type=current_user.active_contact_type,

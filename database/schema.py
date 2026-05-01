@@ -79,6 +79,7 @@ class PriorContact(enum.Enum):
     VK = "вк"
     MESSAGES = "просто сообщения"
     PHONE = "звонок"
+    URL = "ссылка"
 
 
 # Модель Department (Направления)
