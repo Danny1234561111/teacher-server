@@ -198,25 +198,25 @@ class StudentListResponse(BaseModel):
     students: List[StudentResponse]
 
 
-# ===== НОВЫЕ МОДЕЛИ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
+# ===== МОДЕЛИ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
 
 class StudentApplicationResponse(BaseModel):
-    """Ответ с данными о заявлении студента"""
+    """Ответ с данными о заявлении студента - все поля Optional"""
     id: int
     student_id: int
     department_id: int
-    department_name: str
+    department_name: Optional[str] = None
     speciality_id: int
-    speciality_name: str
-    profile_id: Optional[int]
-    profile_name: Optional[str]
-    position: Optional[int]
-    priority: Optional[int]
-    total_score: Optional[int]
-    application_status: Optional[str]
-    consent_status: bool
-    participation: bool
-    is_main_contest: bool
+    speciality_name: Optional[str] = None
+    profile_id: Optional[int] = None
+    profile_name: Optional[str] = None
+    position: Optional[int] = None
+    priority: Optional[int] = None
+    total_score: Optional[int] = None
+    application_status: Optional[str] = None
+    consent_status: Optional[bool] = None
+    participation: Optional[bool] = None
+    is_main_contest: Optional[bool] = None
     created_at: datetime
     updated_at: datetime
 
@@ -408,7 +408,7 @@ async def get_student(
     return student
 
 
-# ===== НОВЫЕ ЭНДПОИНТЫ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
+# ===== ЭНДПОИНТЫ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
 
 @router.get("/{student_id}/applications", response_model=List[StudentApplicationResponse])
 async def get_student_applications(
@@ -449,9 +449,9 @@ async def get_student_applications(
             "priority": app.priority,
             "total_score": app.total_score,
             "application_status": app.application_status.value if app.application_status else None,
-            "consent_status": app.consent_status,
-            "participation": app.participation,
-            "is_main_contest": app.is_main_contest,
+            "consent_status": app.consent_status if app.consent_status is not None else False,
+            "participation": app.participation if app.participation is not None else True,
+            "is_main_contest": app.is_main_contest if app.is_main_contest is not None else False,
             "created_at": app.created_at,
             "updated_at": app.updated_at
         })
@@ -619,8 +619,6 @@ async def delete_student(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
-
-# ===== ЭНДПОИНТЫ ДЛЯ КОММУНИКАЦИЙ =====
 
 @router.get("/{student_id}/communications", response_model=List[CommunicationResponse])
 async def get_student_communications(
