@@ -9,7 +9,7 @@ from services.student_service import StudentService
 from services.communication_service import CommunicationService
 from services.auth_service import AuthService
 from database.database import get_db
-from database.schema import User
+from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus
 
 router = APIRouter(prefix="/api/students", tags=["Students"])
 security = HTTPBearer()
@@ -38,13 +38,11 @@ class ContactStatus(str):
 
     @classmethod
     def normalize(cls, value: str) -> str:
-        """Приводит значение к правильному формату (UPPERCASE)"""
         if not value:
             return value
         value_upper = value.upper()
         if value_upper in cls.get_valid_values():
             return value_upper
-        # Маппинг частых ошибок
         mapping = {
             'STRING': cls.NEW,
             'NEW': cls.NEW,
@@ -58,7 +56,6 @@ class ContactStatus(str):
 
 
 class CommunicationType(str):
-    """Допустимые типы коммуникаций (в БД хранятся в UPPERCASE)"""
     CALL = "CALL"
     MEETING = "MEETING"
     EMAIL = "EMAIL"
@@ -70,13 +67,11 @@ class CommunicationType(str):
 
     @classmethod
     def normalize(cls, value: str) -> str:
-        """Приводит значение к UPPERCASE (как в БД)"""
         if not value:
             return value
         value_upper = value.upper()
         if value_upper in cls.get_valid_values():
             return value_upper
-        # Маппинг распространенных вариантов
         mapping = {
             'CALL': cls.CALL,
             'MEETING': cls.MEETING,
@@ -90,7 +85,6 @@ class CommunicationType(str):
 
 
 class CommunicationStatus(str):
-    """Допустимые статусы коммуникации"""
     PLANNED = "planned"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
@@ -102,13 +96,11 @@ class CommunicationStatus(str):
 
     @classmethod
     def normalize(cls, value: str) -> str:
-        """Приводит значение к правильному формату (lowercase)"""
         if not value:
             return value
         value_lower = value.lower()
         if value_lower in cls.get_valid_values():
             return value_lower
-        # Маппинг частых ошибок
         mapping = {
             'planned': cls.PLANNED,
             'completed': cls.COMPLETED,
@@ -125,7 +117,6 @@ class CommunicationStatus(str):
 # ===== МОДЕЛИ ДЛЯ АБИТУРИЕНТОВ =====
 
 class StudentCreate(BaseModel):
-    """Создание абитуриента - только самое необходимое"""
     full_name: str = Field(..., min_length=2, description="ФИО абитуриента")
     russian_student_id: Optional[int] = Field(None, description="Российский ID студента (7 цифр)")
     phone: Optional[str] = Field(None, description="Номер телефона")
@@ -139,7 +130,6 @@ class StudentCreate(BaseModel):
 
 
 class StudentUpdate(BaseModel):
-    """Обновление абитуриента - можно обновлять любые поля"""
     full_name: Optional[str] = None
     russian_student_id: Optional[int] = None
     phone: Optional[str] = None
@@ -171,7 +161,6 @@ class StudentUpdate(BaseModel):
 
 
 class StudentResponse(BaseModel):
-    """Ответ с данными абитуриента - ВСЕ СТАТУСЫ"""
     id: int
     russian_student_id: Optional[int]
     full_name: str
@@ -193,6 +182,7 @@ class StudentResponse(BaseModel):
     contact_type: Optional[str]
     consent_status: Optional[bool]
     total_score: Optional[int]
+    position: Optional[int]
     last_communication: Optional[datetime]
     last_communication_note: Optional[str]
     kurator_id: Optional[int]
@@ -208,60 +198,57 @@ class StudentListResponse(BaseModel):
     students: List[StudentResponse]
 
 
+# ===== НОВЫЕ МОДЕЛИ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
+
+class StudentApplicationResponse(BaseModel):
+    """Ответ с данными о заявлении студента"""
+    id: int
+    student_id: int
+    department_id: int
+    department_name: str
+    speciality_id: int
+    speciality_name: str
+    profile_id: Optional[int]
+    profile_name: Optional[str]
+    position: Optional[int]
+    priority: Optional[int]
+    total_score: Optional[int]
+    application_status: Optional[str]
+    consent_status: bool
+    participation: bool
+    is_main_contest: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class CompetitiveInfoResponse(BaseModel):
+    """Ответ с конкурсной информацией по студенту"""
+    position: Optional[int]
+    total_students: int
+    total_enrolled: int
+    total_submitted: int
+    average_score: float
+    min_score: int
+    max_score: int
+    passing_score: Optional[int]
+    student_score: Optional[int]
+    department_name: Optional[str]
+    speciality_name: Optional[str]
+    profile_name: Optional[str]
+
+
 # ===== МОДЕЛИ ДЛЯ КОММУНИКАЦИЙ =====
 
 class CommunicationCreate(BaseModel):
-    """Создание записи о коммуникации"""
     communication_type: str = Field(..., description="Тип коммуникации")
     status: Optional[str] = Field("completed", description="Статус коммуникации")
     date_time: Optional[datetime] = Field(None, description="Дата и время")
     duration_minutes: Optional[int] = Field(None, ge=1, le=480, description="Длительность в минутах")
     notes: Optional[str] = Field(None, max_length=2000, description="Заметки")
     contact_status: Optional[str] = Field(None, description="Новый статус контакта для студента")
-
-    @field_validator('communication_type')
-    @classmethod
-    def validate_communication_type(cls, v):
-        if v:
-            normalized = CommunicationType.normalize(v)
-            if normalized not in CommunicationType.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый тип коммуникации: {v}. "
-                    f"Допустимые: {', '.join([t.lower() for t in CommunicationType.get_valid_values()])}"
-                )
-            return normalized
-        return v
-
-    @field_validator('status')
-    @classmethod
-    def validate_status(cls, v):
-        if v:
-            normalized = CommunicationStatus.normalize(v)
-            if normalized not in CommunicationStatus.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый статус. Допустимые: {', '.join(CommunicationStatus.get_valid_values())}")
-            return normalized
-        return 'completed'
-
-    @field_validator('contact_status')
-    @classmethod
-    def validate_contact_status(cls, v):
-        if v:
-            normalized = ContactStatus.normalize(v)
-            if normalized not in ContactStatus.get_valid_values():
-                raise ValueError(f"Недопустимый статус контакта: {v}. "
-                               f"Допустимые: {', '.join(ContactStatus.get_valid_values())}")
-            return normalized
-        return v
-
-
-class CommunicationUpdate(BaseModel):
-    """Обновление записи о коммуникации"""
-    communication_type: Optional[str] = None
-    status: Optional[str] = None
-    date_time: Optional[datetime] = None
-    duration_minutes: Optional[int] = Field(None, ge=1, le=480)
-    notes: Optional[str] = Field(None, max_length=2000)
 
     @field_validator('communication_type')
     @classmethod
@@ -283,11 +270,48 @@ class CommunicationUpdate(BaseModel):
                 raise ValueError(
                     f"Недопустимый статус. Допустимые: {', '.join(CommunicationStatus.get_valid_values())}")
             return normalized
+        return 'completed'
+
+    @field_validator('contact_status')
+    @classmethod
+    def validate_contact_status(cls, v):
+        if v:
+            normalized = ContactStatus.normalize(v)
+            if normalized not in ContactStatus.get_valid_values():
+                raise ValueError(f"Недопустимый статус контакта: {v}")
+            return normalized
+        return v
+
+
+class CommunicationUpdate(BaseModel):
+    communication_type: Optional[str] = None
+    status: Optional[str] = None
+    date_time: Optional[datetime] = None
+    duration_minutes: Optional[int] = Field(None, ge=1, le=480)
+    notes: Optional[str] = Field(None, max_length=2000)
+
+    @field_validator('communication_type')
+    @classmethod
+    def validate_communication_type(cls, v):
+        if v:
+            normalized = CommunicationType.normalize(v)
+            if normalized not in CommunicationType.get_valid_values():
+                raise ValueError(f"Недопустимый тип коммуникации")
+            return normalized
+        return v
+
+    @field_validator('status')
+    @classmethod
+    def validate_status(cls, v):
+        if v:
+            normalized = CommunicationStatus.normalize(v)
+            if normalized not in CommunicationStatus.get_valid_values():
+                raise ValueError(f"Недопустимый статус")
+            return normalized
         return v
 
 
 class CommunicationResponse(BaseModel):
-    """Ответ с данными о коммуникации"""
     id: int
     student_id: int
     student_name: Optional[str]
@@ -305,7 +329,6 @@ class CommunicationResponse(BaseModel):
 
 
 class CommunicationStatsResponse(BaseModel):
-    """Статистика по коммуникациям"""
     total_communications: int
     by_type: dict
     contact_status_distribution: Optional[dict] = {}
@@ -345,7 +368,7 @@ async def get_students(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Получение списка доступных абитуриентов с фильтрацией по всем статусам"""
+    """Получение списка доступных абитуриентов с фильтрацией"""
     students = student_service.get_available_students(
         user_id=current_user.id,
         db=db,
@@ -372,7 +395,7 @@ async def get_student(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Получение абитуриента по ID со всеми статусами"""
+    """Получение абитуриента по ID"""
     student = student_service.get_student_by_id(
         student_id=student_id,
         user_id=current_user.id,
@@ -385,13 +408,162 @@ async def get_student(
     return student
 
 
+# ===== НОВЫЕ ЭНДПОИНТЫ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
+
+@router.get("/{student_id}/applications", response_model=List[StudentApplicationResponse])
+async def get_student_applications(
+        student_id: int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """Получение всех заявлений студента на специальности"""
+    # Проверяем доступ к студенту
+    student = student_service.get_student_by_id(
+        student_id=student_id,
+        user_id=current_user.id,
+        db=db
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
+
+    applications = db.query(StudentApplication).filter(
+        StudentApplication.student_id == student_id
+    ).all()
+
+    result = []
+    for app in applications:
+        department = db.query(Department).filter(Department.id == app.department_id).first()
+        speciality = db.query(Speciality).filter(Speciality.id == app.speciality_id).first()
+        profile = db.query(Profile).filter(Profile.id == app.profile_id).first() if app.profile_id else None
+
+        result.append({
+            "id": app.id,
+            "student_id": app.student_id,
+            "department_id": app.department_id,
+            "department_name": department.name if department else None,
+            "speciality_id": app.speciality_id,
+            "speciality_name": speciality.name if speciality else None,
+            "profile_id": app.profile_id,
+            "profile_name": profile.name if profile else None,
+            "position": app.position,
+            "priority": app.priority,
+            "total_score": app.total_score,
+            "application_status": app.application_status.value if app.application_status else None,
+            "consent_status": app.consent_status,
+            "participation": app.participation,
+            "is_main_contest": app.is_main_contest,
+            "created_at": app.created_at,
+            "updated_at": app.updated_at
+        })
+
+    return result
+
+
+@router.get("/{student_id}/competitive-info", response_model=CompetitiveInfoResponse)
+async def get_student_competitive_info(
+        student_id: int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """Получение конкурсной информации по студенту (место, проходной балл, статистика)"""
+    # Проверяем доступ к студенту
+    student = student_service.get_student_by_id(
+        student_id=student_id,
+        user_id=current_user.id,
+        db=db
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
+
+    # Получаем основное заявление (с наивысшим приоритетом или первое)
+    main_application = db.query(StudentApplication).filter(
+        StudentApplication.student_id == student_id
+    ).order_by(StudentApplication.priority.asc(), StudentApplication.id.asc()).first()
+
+    if not main_application:
+        return CompetitiveInfoResponse(
+            position=None,
+            total_students=0,
+            total_enrolled=0,
+            total_submitted=0,
+            average_score=0,
+            min_score=0,
+            max_score=0,
+            passing_score=None,
+            student_score=student.get('total_score'),
+            department_name=None,
+            speciality_name=None,
+            profile_name=None
+        )
+
+    # Получаем всех студентов на той же специальности
+    query = db.query(StudentApplication).filter(
+        StudentApplication.department_id == main_application.department_id,
+        StudentApplication.speciality_id == main_application.speciality_id
+    )
+
+    if main_application.profile_id:
+        query = query.filter(StudentApplication.profile_id == main_application.profile_id)
+
+    all_applications = query.all()
+
+    # Сортируем по баллам (по убыванию)
+    sorted_apps = sorted(all_applications, key=lambda x: x.total_score or 0, reverse=True)
+
+    # Находим место текущего студента
+    position = 1
+    for i, app in enumerate(sorted_apps, 1):
+        if app.student_id == student_id:
+            position = i
+            break
+
+    # Подсчет статистики
+    total_students = len(all_applications)
+    enrolled_count = len([a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED])
+    submitted_count = len([a for a in all_applications if a.application_status != ApplicationStatus.PENDING])
+
+    scores = [a.total_score for a in all_applications if a.total_score and a.total_score > 0]
+    avg_score = sum(scores) / len(scores) if scores else 0
+    min_score = min(scores) if scores else 0
+    max_score = max(scores) if scores else 0
+
+    # Проходной балл (балл последнего зачисленного)
+    passing_score = None
+    if enrolled_count > 0:
+        enrolled_apps = [a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED]
+        enrolled_sorted = sorted(enrolled_apps, key=lambda x: x.total_score or 0, reverse=True)
+        if enrolled_sorted:
+            passing_score = enrolled_sorted[-1].total_score
+
+    department = db.query(Department).filter(Department.id == main_application.department_id).first()
+    speciality = db.query(Speciality).filter(Speciality.id == main_application.speciality_id).first()
+    profile = db.query(Profile).filter(Profile.id == main_application.profile_id).first() if main_application.profile_id else None
+
+    return CompetitiveInfoResponse(
+        position=position,
+        total_students=total_students,
+        total_enrolled=enrolled_count,
+        total_submitted=submitted_count,
+        average_score=round(avg_score, 2),
+        min_score=min_score,
+        max_score=max_score,
+        passing_score=passing_score,
+        student_score=main_application.total_score,
+        department_name=department.name if department else None,
+        speciality_name=speciality.name if speciality else None,
+        profile_name=profile.name if profile else None
+    )
+
+
+# ===== ЭНДПОИНТЫ ДЛЯ КОММУНИКАЦИЙ =====
+
 @router.post("", response_model=StudentResponse, status_code=201)
 async def create_student(
         student_data: StudentCreate,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Создание нового абитуриента (только ФИО, ID и телефон)"""
+    """Создание нового абитуриента"""
     try:
         return student_service.create_student(
             student_data.dict(exclude_unset=True),
@@ -409,7 +581,7 @@ async def update_student(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Обновление данных абитуриента, включая все статусы"""
+    """Обновление данных абитуриента"""
     try:
         student = student_service.update_student(
             student_id=student_id,
@@ -432,7 +604,7 @@ async def delete_student(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Удаление абитуриента (только для админа)"""
+    """Удаление абитуриента"""
     try:
         deleted = student_service.delete_student(
             student_id=student_id,
@@ -448,7 +620,7 @@ async def delete_student(
         raise HTTPException(status_code=403, detail=str(e))
 
 
-# ===== ЭНДПОИНТЫ ДЛЯ КОММУНИКАЦИЙ (ВНУТРИ СТУДЕНТОВ) =====
+# ===== ЭНДПОИНТЫ ДЛЯ КОММУНИКАЦИЙ =====
 
 @router.get("/{student_id}/communications", response_model=List[CommunicationResponse])
 async def get_student_communications(
@@ -459,7 +631,6 @@ async def get_student_communications(
         db: Session = Depends(get_db)
 ):
     """Получение истории коммуникаций с абитуриентом"""
-    # Проверяем доступ к абитуриенту
     student = student_service.get_student_by_id(
         student_id=student_id,
         user_id=current_user.id,
@@ -488,7 +659,6 @@ async def create_student_communication(
         db: Session = Depends(get_db)
 ):
     """Создание записи о коммуникации с абитуриентом"""
-    # Проверяем доступ к абитуриенту
     student = student_service.get_student_by_id(
         student_id=student_id,
         user_id=current_user.id,
@@ -499,7 +669,6 @@ async def create_student_communication(
         raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
 
     try:
-        # Добавляем student_id в данные
         full_data = comm_data.dict(exclude_unset=True)
         full_data['student_id'] = student_id
 
@@ -573,4 +742,3 @@ async def get_communication_stats(
         db=db,
         days_back=days_back
     )
-
