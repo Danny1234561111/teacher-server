@@ -1,10 +1,10 @@
 # services/student_service.py
 from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
 
 from database.schema import (
-    Student, User, Communication, Department, Speciality, Profile,
+    Student, User, Communication, Department, Speciality, Profile, StudentApplication,
     StudentStatus, ApplicationStatus, ContactStatus, PriorContact, ContactType,
     StudyLevel, StudyForm, StudyBasis
 )
@@ -36,34 +36,26 @@ class StudentService:
         # Фильтр по куратору или доступным направлениям
         user = db.query(User).filter(User.id == user_id).first()
         if user.role == 'admin':
-            # Админ видит всех
             pass
         else:
-            # Преподаватель видит только своих или по назначенным направлениям
             if user.assigned_departments:
-                query = query.filter(Student.department_id.in_(user.assigned_departments))
+                # Ищем студентов у которых есть заявление на assigned_departments
+                query = query.join(StudentApplication).filter(
+                    StudentApplication.department_id.in_(user.assigned_departments)
+                ).distinct()
             else:
                 query = query.filter(Student.kurator_id == user_id)
 
-        # Дополнительные фильтры по статусам
+        # Фильтры по статусам
         if status:
             try:
-                status_enum = StudentStatus(status)
-                query = query.filter(Student.status == status_enum)
-            except ValueError:
-                pass
-
-        if application_status:
-            try:
-                app_status_enum = ApplicationStatus(application_status)
-                query = query.filter(Student.application_status == app_status_enum)
+                query = query.filter(Student.status == StudentStatus(status))
             except ValueError:
                 pass
 
         if contact_status:
             try:
-                contact_status_enum = ContactStatus(contact_status)
-                query = query.filter(Student.contact_status == contact_status_enum)
+                query = query.filter(Student.contact_status == ContactStatus(contact_status))
             except ValueError:
                 pass
 
@@ -71,9 +63,11 @@ class StudentService:
             query = query.filter(Student.consent_status == consent_status)
 
         if department_id:
-            query = query.filter(Student.department_id == department_id)
+            query = query.join(StudentApplication).filter(StudentApplication.department_id == department_id).distinct()
+
         if speciality_id:
-            query = query.filter(Student.speciality_id == speciality_id)
+            query = query.join(StudentApplication).filter(StudentApplication.speciality_id == speciality_id).distinct()
+
         if search:
             query = query.filter(
                 (Student.full_name.ilike(f"%{search}%")) |
@@ -90,15 +84,44 @@ class StudentService:
         if not student:
             return None
 
-        # Проверка доступа
         if not self._can_access_student(student, user_id, db):
             return None
 
         return self._student_to_dict(student, db)
 
+    def get_student_applications(self, student_id: int, db: Session) -> List[Dict[str, Any]]:
+        """Получение всех заявлений студента"""
+        applications = db.query(StudentApplication).filter(
+            StudentApplication.student_id == student_id
+        ).all()
+
+        result = []
+        for app in applications:
+            department = db.query(Department).filter(Department.id == app.department_id).first()
+            speciality = db.query(Speciality).filter(Speciality.id == app.speciality_id).first()
+            profile = db.query(Profile).filter(Profile.id == app.profile_id).first()
+
+            result.append({
+                'id': app.id,
+                'department_id': app.department_id,
+                'department_name': department.name if department else None,
+                'speciality_id': app.speciality_id,
+                'speciality_name': speciality.name if speciality else None,
+                'profile_id': app.profile_id,
+                'profile_name': profile.name if profile else None,
+                'position': app.position,
+                'priority': app.priority,
+                'total_score': app.total_score,
+                'application_status': app.application_status.value if app.application_status else None,
+                'consent_status': app.consent_status,
+                'participation': app.participation,
+                'is_main_contest': app.is_main_contest,
+            })
+
+        return result
+
     def create_student(self, student_data: Dict[str, Any], user_id: int, db: Session) -> Dict[str, Any]:
         """Создание нового абитуриента"""
-        # Проверяем, не существует ли уже абитуриент с таким russian_student_id
         if student_data.get('russian_student_id'):
             existing = db.query(Student).filter(
                 Student.russian_student_id == student_data['russian_student_id']
@@ -106,25 +129,18 @@ class StudentService:
             if existing:
                 raise ValueError("Абитуриент с таким ID уже существует")
 
-        # Создаем абитуриента
         new_student = Student(
             russian_student_id=student_data.get('russian_student_id'),
             full_name=student_data['full_name'],
             phone=student_data.get('phone'),
             additional_contacts=student_data.get('additional_contacts'),
             prior_contact=PriorContact(student_data['prior_contact']) if student_data.get('prior_contact') else None,
-            department_id=student_data.get('department_id'),
-            speciality_id=student_data.get('speciality_id'),
-            profile_id=student_data.get('profile_id'),
             study_level=StudyLevel(student_data['study_level']) if student_data.get('study_level') else None,
             study_form=StudyForm(student_data['study_form']) if student_data.get('study_form') else None,
             study_basis=StudyBasis(student_data['study_basis']) if student_data.get('study_basis') else None,
             status=StudentStatus.ACTIVE,
-            application_status=ApplicationStatus.PENDING,
             contact_status=ContactStatus.NEW,
             contact_type=ContactType(student_data['contact_type']) if student_data.get('contact_type') else None,
-            consent_status=student_data.get('consent_status'),
-            total_score=student_data.get('total_score'),
             kurator_id=user_id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
@@ -133,6 +149,21 @@ class StudentService:
         db.add(new_student)
         db.commit()
         db.refresh(new_student)
+
+        # Если есть данные о специальности - создаем заявление
+        if student_data.get('department_id') and student_data.get('speciality_id'):
+            application = StudentApplication(
+                student_id=new_student.id,
+                department_id=student_data.get('department_id'),
+                speciality_id=student_data.get('speciality_id'),
+                profile_id=student_data.get('profile_id'),
+                total_score=student_data.get('total_score'),
+                application_status=ApplicationStatus(student_data['application_status']) if student_data.get(
+                    'application_status') else ApplicationStatus.PENDING,
+                consent_status=student_data.get('consent_status', False)
+            )
+            db.add(application)
+            db.commit()
 
         return self._student_to_dict(new_student, db)
 
@@ -148,37 +179,25 @@ class StudentService:
         if not student:
             return None
 
-        # Проверка доступа
         if not self._can_access_student(student, user_id, db):
             raise PermissionError("Нет доступа к этому абитуриенту")
 
-        # Обновляем поля
         for field, value in update_data.items():
             if value is None:
                 continue
 
             if hasattr(student, field):
-                # Обработка поля prior_contact (ВАЖНО!)
                 if field == 'prior_contact' and isinstance(value, str):
                     if value:
                         try:
                             setattr(student, field, PriorContact(value))
-                            print(f"✅ Обновлен prior_contact: {value} -> {PriorContact(value)}")
                         except ValueError as e:
-                            print(f"⚠️ Ошибка при обновлении prior_contact: {value} - {e}")
+                            print(f"⚠️ Ошибка: {e}")
                     else:
                         setattr(student, field, None)
-                        print(f"✅ prior_contact установлен в None")
-
-                # Обработка полей с Enum
                 elif field == 'status' and isinstance(value, str):
                     try:
                         setattr(student, field, StudentStatus(value))
-                    except ValueError:
-                        pass
-                elif field == 'application_status' and isinstance(value, str):
-                    try:
-                        setattr(student, field, ApplicationStatus(value))
                     except ValueError:
                         pass
                 elif field == 'contact_status' and isinstance(value, str):
@@ -206,10 +225,7 @@ class StudentService:
                         setattr(student, field, StudyBasis(value))
                     except ValueError:
                         pass
-                elif field == 'consent_status':
-                    setattr(student, field, value)
                 else:
-                    # Обычные поля
                     setattr(student, field, value)
 
         student.updated_at = datetime.utcnow()
@@ -224,7 +240,6 @@ class StudentService:
         if not student:
             return False
 
-        # Проверка доступа
         if not self._can_access_student(student, user_id, db):
             raise PermissionError("Нет доступа к этому абитуриенту")
 
@@ -236,29 +251,50 @@ class StudentService:
         """Проверка доступа пользователя к абитуриенту"""
         user = db.query(User).filter(User.id == user_id).first()
 
-        # Админ имеет доступ ко всем
         if user.role == 'admin':
             return True
 
-        # Свой куратор
         if student.kurator_id == user_id:
             return True
 
-        # Если у преподавателя есть назначенные направления
-        if user.assigned_departments and student.department_id in user.assigned_departments:
-            return True
+        if user.assigned_departments:
+            # Проверяем, есть ли у студента заявление на assigned_departments
+            application = db.query(StudentApplication).filter(
+                StudentApplication.student_id == student.id,
+                StudentApplication.department_id.in_(user.assigned_departments)
+            ).first()
+            if application:
+                return True
 
         return False
 
     def _student_to_dict(self, student: Student, db: Session) -> Dict[str, Any]:
-        """Конвертация абитуриента в словарь - ВСЕ ПОЛЯ"""
+        """Конвертация абитуриента в словарь"""
         if not student:
             return None
 
-        # Получаем связанные данные
-        department = db.query(Department).filter(Department.id == student.department_id).first()
-        speciality = db.query(Speciality).filter(Speciality.id == student.speciality_id).first()
-        profile = db.query(Profile).filter(Profile.id == student.profile_id).first()
+        # Получаем основное заявление (с наивысшим приоритетом или первое)
+        main_application = db.query(StudentApplication).filter(
+            StudentApplication.student_id == student.id
+        ).order_by(StudentApplication.priority.asc(), StudentApplication.id.asc()).first()
+
+        # Получаем связанные данные из основного заявления
+        department = None
+        speciality = None
+        profile = None
+        total_score = None
+        application_status = None
+        consent_status = None
+        position = None
+
+        if main_application:
+            department = db.query(Department).filter(Department.id == main_application.department_id).first()
+            speciality = db.query(Speciality).filter(Speciality.id == main_application.speciality_id).first()
+            profile = db.query(Profile).filter(Profile.id == main_application.profile_id).first()
+            total_score = main_application.total_score
+            application_status = main_application.application_status.value if main_application.application_status else None
+            consent_status = main_application.consent_status
+            position = main_application.position
 
         # Получаем последнюю коммуникацию
         last_comm = db.query(Communication).filter(
@@ -272,21 +308,22 @@ class StudentService:
             'phone': student.phone,
             'additional_contacts': student.additional_contacts,
             'prior_contact': student.prior_contact.value if student.prior_contact else None,
-            'department_id': student.department_id,
+            'department_id': main_application.department_id if main_application else None,
             'department_name': department.name if department else None,
-            'speciality_id': student.speciality_id,
+            'speciality_id': main_application.speciality_id if main_application else None,
             'speciality_name': speciality.name if speciality else None,
-            'profile_id': student.profile_id,
+            'profile_id': main_application.profile_id if main_application else None,
             'profile_name': profile.name if profile else None,
             'study_level': student.study_level.value if student.study_level else None,
             'study_form': student.study_form.value if student.study_form else None,
             'study_basis': student.study_basis.value if student.study_basis else None,
             'status': student.status.value if student.status else None,
-            'application_status': student.application_status.value if student.application_status else None,
+            'application_status': application_status,
             'contact_status': student.contact_status.value if student.contact_status else None,
             'contact_type': student.contact_type.value if student.contact_type else None,
-            'consent_status': student.consent_status,
-            'total_score': student.total_score,
+            'consent_status': consent_status,
+            'total_score': total_score,
+            'position': position,
             'last_communication': last_comm.date_time if last_comm else None,
             'last_communication_note': last_comm.notes if last_comm else None,
             'kurator_id': student.kurator_id,

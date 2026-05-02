@@ -135,7 +135,7 @@ class Profile(Base):
     applications = relationship("StudentApplication", back_populates="profile")
 
 
-# Модель StudentApplication (Заявление абитуриента на специальность) - НОВАЯ
+# Модель StudentApplication (Заявление абитуриента на специальность)
 class StudentApplication(Base):
     """Заявление абитуриента на конкретную конкурсную группу (многие ко многим)"""
     __tablename__ = "student_applications"
@@ -147,13 +147,13 @@ class StudentApplication(Base):
     profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=True)
 
     # Конкурсная информация по этой специальности
-    position = Column(Integer, nullable=True)  # Место в конкурсе
-    priority = Column(Integer, nullable=True)  # Приоритет заявления
-    is_main_contest = Column(Boolean, default=False)  # Основной конкурс
-    participation = Column(Boolean, default=True)  # Участие в конкурсе
-    consent_status = Column(Boolean, default=False)  # Согласие на зачисление
+    position = Column(Integer, nullable=True)
+    priority = Column(Integer, nullable=True)
+    is_main_contest = Column(Boolean, default=False)
+    participation = Column(Boolean, default=True)
+    consent_status = Column(Boolean, default=False)
     application_status = Column(Enum(ApplicationStatus), default=ApplicationStatus.PENDING)
-    total_score = Column(Integer, nullable=True)  # Баллы по этой специальности
+    total_score = Column(Integer, nullable=True)
 
     # Данные из API
     main_contest_other = Column(String, nullable=True)
@@ -169,7 +169,7 @@ class StudentApplication(Base):
     profile = relationship("Profile", back_populates="applications")
 
 
-# Модель Student (Абитуриент) - ОБНОВЛЕНА
+# Модель Student (Абитуриент) - ИСПРАВЛЕНА (удалены дублирующиеся поля)
 class Student(Base):
     __tablename__ = "students"
 
@@ -180,17 +180,12 @@ class Student(Base):
     additional_contacts = Column(JSON, nullable=True)
     prior_contact = Column(Enum(PriorContact), nullable=True)
 
-    # ОСНОВНАЯ специальность (для обратной совместимости, рекомендуется использовать applications)
-    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
-    speciality_id = Column(Integer, ForeignKey("specialities.id"), nullable=True)
-    profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=True)
-
     # Общая информация (не зависит от специальности)
     study_level = Column(Enum(StudyLevel), nullable=True)
     study_form = Column(Enum(StudyForm), nullable=True)
     study_basis = Column(Enum(StudyBasis), nullable=True)
 
-    # Общие статусы
+    # Общие статусы (относятся к студенту в целом)
     status = Column(Enum(StudentStatus), default=StudentStatus.ACTIVE)
     contact_status = Column(Enum(ContactStatus), default=ContactStatus.NEW)
     contact_type = Column(Enum(ContactType), nullable=True)
@@ -205,11 +200,6 @@ class Student(Base):
     applications = relationship("StudentApplication", back_populates="student", cascade="all, delete-orphan")
     communications = relationship("Communication", back_populates="student", cascade="all, delete-orphan")
     kurator = relationship("User", foreign_keys=[kurator_id], back_populates="kurator_students")
-
-    # Для обратной совместимости (основная специальность)
-    department = relationship("Department", foreign_keys=[department_id])
-    speciality = relationship("Speciality", foreign_keys=[speciality_id])
-    profile = relationship("Profile", foreign_keys=[profile_id])
 
 
 # Модель User (Пользователи)
