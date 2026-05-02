@@ -201,7 +201,7 @@ class StudentListResponse(BaseModel):
 # ===== МОДЕЛИ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
 
 class StudentApplicationResponse(BaseModel):
-    """Ответ с данными о заявлении студента - все поля Optional"""
+    """Ответ с данными о заявлении студента"""
     id: int
     student_id: int
     department_id: int
@@ -409,6 +409,7 @@ async def get_student(
 
 
 # ===== ЭНДПОИНТЫ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
+# ВАЖНО: пути без дублирования /api/students, так как router уже имеет prefix="/api/students"
 
 @router.get("/{student_id}/applications", response_model=List[StudentApplicationResponse])
 async def get_student_applications(
@@ -555,7 +556,7 @@ async def get_student_competitive_info(
     )
 
 
-# ===== ЭНДПОИНТЫ ДЛЯ КОММУНИКАЦИЙ =====
+# ===== ЭНДПОИНТЫ ДЛЯ СОЗДАНИЯ/ОБНОВЛЕНИЯ/УДАЛЕНИЯ =====
 
 @router.post("", response_model=StudentResponse, status_code=201)
 async def create_student(
@@ -619,6 +620,8 @@ async def delete_student(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
 
+
+# ===== ЭНДПОИНТЫ ДЛЯ КОММУНИКАЦИЙ =====
 
 @router.get("/{student_id}/communications", response_model=List[CommunicationResponse])
 async def get_student_communications(
