@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 
 from services.admin_service import AdminService
@@ -265,3 +265,25 @@ async def delete_profile(
         raise HTTPException(status_code=404, detail="Профиль не найден")
 
     return {"message": "Профиль удален"}
+
+@router.get("/statistics")
+async def get_statistics(
+        current_user: Dict[str, Any] = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Получение статистики по абитуриентам"""
+    from services.parser_service import GROUPS_CONFIG
+    from services.parser_service import ParserService
+
+    parser = ParserService(db)
+
+    stats = {}
+    for group_config in GROUPS_CONFIG:
+        group_stats = parser.calculate_group_statistics(group_config)
+        stats[group_config['name']] = {
+            "name": group_config['name'],
+            "profile_name": group_config['profile_name'],
+            **group_stats
+        }
+
+    return stats

@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # --- Конфигурация ---
-API_URL = "https://pk.isu.ru/x/getProcessor"
+API_URL = "https://lka.isu.ru/x/getProcessor"
 
 # Правильные заголовки из браузера
 HEADERS = {
@@ -30,95 +30,121 @@ HEADERS = {
     'sec-ch-ua-platform': '"Android"',
 }
 
-# UID конкурсной группы из API
-GROUP_UID = "8d51d4dd-134e-11f0-8122-82761dd90eed"
+# Конфигурация групп для парсинга
+GROUPS_CONFIG = [
+    {
+        "uid": "8d51d4dd-134e-11f0-8122-82761dd90eed",
+        "name": "Разработка",
+        "department_name": "Информатика и вычислительная техника",
+        "speciality_name": "Прикладная информатика",
+        "profile_name": "Прикладная информатика в разработке",
+        "study_level": "Бакалавриат",
+        "study_form": "Очная",
+        "study_basis": "Бюджетная основа"
+    },
+    {
+        "uid": "8d51d4dd-134e-11f0-8122-82761dd90eed",  # Тот же UID? Возможно, нужно другой
+        "name": "Дизайн",
+        "department_name": "Факультет бизнес-коммуникаций и информатики",
+        "speciality_name": "Прикладная информатика",
+        "profile_name": "Прикладная информатика в дизайне",
+        "study_level": "Бакалавриат",
+        "study_form": "Очная",
+        "study_basis": "Бюджетная основа"
+    }
+]
 
 
 class ParserService:
-    """Сервис для парсинга данных абитуриентов - ТОЛЬКО ОБНОВЛЕНИЕ"""
+    """Сервис для парсинга данных абитуриентов - ОБНОВЛЕНИЕ И СТАТИСТИКА"""
 
     def __init__(self, db: Session):
         self.db = db
-        self.stats = {
-            "students_updated": 0,
-            "students_skipped": 0,
-            "errors": 0
+
+        # Статистика по всем группам
+        self.all_stats = {
+            "groups": {},
+            "total": {
+                "students_updated": 0,
+                "students_skipped": 0,
+                "students_created": 0,
+                "errors": 0
+            }
         }
 
-        # Данные о группе будут загружены из БД
-        self.group_info = None
-        self._load_group_info()
+    def _get_or_create_department(self, department_name: str, faculty_name: str = None) -> Optional[Department]:
+        """Получает или создает направление"""
+        department = self.db.query(Department).filter(
+            Department.name == department_name
+        ).first()
 
-    def _load_group_info(self):
-        """Загружает информацию о группе из базы данных по названиям"""
-        try:
-            # Ищем направление по названию
-            department = self.db.query(Department).filter(
-                Department.name == "Информатика и вычислительная техника"
-            ).first()
+        if not department:
+            logger.info(f"➕ Создание нового направления: {department_name}")
+            department = Department(
+                code=department_name[:10].upper().replace(" ", "_"),
+                name=department_name,
+                faculty=faculty_name or department_name
+            )
+            self.db.add(department)
+            self.db.flush()
+            logger.info(f"✅ Создано направление с ID: {department.id}")
 
-            if not department:
-                logger.error("❌ Направление не найдено в БД")
-                # Попробуем найти любое направление
-                department = self.db.query(Department).first()
-                if not department:
-                    logger.error("❌ В БД нет ни одного направления")
-                    return
+        return department
 
-            # Ищем специальность по названию
-            speciality = self.db.query(Speciality).filter(
-                Speciality.name.like("%Прикладная информатика%"),
-                Speciality.department_id == department.id
-            ).first()
+    def _get_or_create_speciality(self, speciality_name: str, department_id: int, code: str = None) -> Optional[
+        Speciality]:
+        """Получает или создает специальность"""
+        speciality = self.db.query(Speciality).filter(
+            Speciality.name == speciality_name,
+            Speciality.department_id == department_id
+        ).first()
 
-            if not speciality:
-                logger.error("❌ Специальность не найдена в БД")
-                # Возьмем любую специальность этого направления
-                speciality = self.db.query(Speciality).filter(
-                    Speciality.department_id == department.id
-                ).first()
-                if not speciality:
-                    logger.error("❌ В БД нет ни одной специальности")
-                    return
+        if not speciality:
+            logger.info(f"➕ Создание новой специальности: {speciality_name}")
+            speciality = Speciality(
+                code=code or speciality_name[:10].upper().replace(" ", "_"),
+                name=speciality_name,
+                department_id=department_id
+            )
+            self.db.add(speciality)
+            self.db.flush()
+            logger.info(f"✅ Создана специальность с ID: {speciality.id}")
 
-            # Ищем профиль
-            profile = self.db.query(Profile).filter(
-                Profile.speciality_id == speciality.id
-            ).first()
+        return speciality
 
-            self.group_info = {
-                "name": f"{speciality.code if speciality.code else ''} {speciality.name}",
-                "department_id": department.id,
-                "department_name": department.name,
-                "speciality_id": speciality.id,
-                "speciality_name": speciality.name,
-                "profile_id": profile.id if profile else None,
-                "profile_name": profile.name if profile else None,
-                "faculty_name": department.faculty
-            }
+    def _get_or_create_profile(self, profile_name: str, speciality_id: int) -> Optional[Profile]:
+        """Получает или создает профиль"""
+        profile = self.db.query(Profile).filter(
+            Profile.name == profile_name,
+            Profile.speciality_id == speciality_id
+        ).first()
 
-            logger.info(f"✅ Загружена информация о группе из БД:")
-            logger.info(f"   Направление: {department.name} (ID: {department.id})")
-            logger.info(f"   Специальность: {speciality.name} (ID: {speciality.id})")
-            if profile:
-                logger.info(f"   Профиль: {profile.name} (ID: {profile.id})")
+        if not profile:
+            logger.info(f"➕ Создание нового профиля: {profile_name}")
+            profile = Profile(
+                name=profile_name,
+                speciality_id=speciality_id,
+                code=profile_name[:10].upper().replace(" ", "_")
+            )
+            self.db.add(profile)
+            self.db.flush()
+            logger.info(f"✅ Создан профиль с ID: {profile.id}")
 
-        except Exception as e:
-            logger.error(f"❌ Ошибка загрузки информации о группе: {e}")
+        return profile
 
-    def fetch_group_data(self) -> Optional[Dict[str, Any]]:
+    def fetch_group_data(self, group_uid: str) -> Optional[Dict[str, Any]]:
         """Получает данные для конкурсной группы"""
         payload = {
             "processor": "rating_getListAbiturients",
             "КонкурснаяГруппа": {
                 "type": "CatalogRef",
                 "catalog": "КонкурсныеГруппы",
-                "uid": GROUP_UID
+                "uid": group_uid
             }
         }
 
         try:
-            logger.info(f"📤 Запрос для группы {GROUP_UID}")
+            logger.info(f"📤 Запрос для группы {group_uid}")
 
             json_payload = json.dumps(payload, ensure_ascii=False)
             response = requests.post(
@@ -142,36 +168,8 @@ class ParserService:
             logger.error(f"❌ Ошибка запроса: {e}")
             return None
 
-    def map_study_level(self, level_name: str) -> Optional[StudyLevel]:
-        """Маппинг уровня подготовки - возвращает Enum"""
-        mapping = {
-            "Бакалавриат": StudyLevel.BACHELOR,
-            "Магистратура": StudyLevel.MASTER,
-            "Специалитет": StudyLevel.SPECIALIST,
-            "Аспирантура": StudyLevel.PHD
-        }
-        return mapping.get(level_name)
-
-    def map_study_form(self, form_name: str) -> Optional[StudyForm]:
-        """Маппинг формы обучения - возвращает Enum"""
-        mapping = {
-            "Очная": StudyForm.FULL_TIME,
-            "Очно-заочная": StudyForm.PART_TIME,
-            "Заочная": StudyForm.CORRESPONDENCE
-        }
-        return mapping.get(form_name)
-
-    def map_study_basis(self, basis_name: str) -> Optional[StudyBasis]:
-        """Маппинг основания - возвращает Enum"""
-        mapping = {
-            "Бюджетная основа": StudyBasis.BUDGET,
-            "Платная основа": StudyBasis.PAID,
-            "Целевая основа": StudyBasis.TARGET
-        }
-        return mapping.get(basis_name)
-
     def map_application_status(self, status_name: str) -> Optional[ApplicationStatus]:
-        """Маппинг статуса заявления - возвращает Enum ApplicationStatus"""
+        """Маппинг статуса заявления"""
         mapping = {
             "Подано": ApplicationStatus.PENDING,
             "Принято": ApplicationStatus.ACCEPTED,
@@ -181,53 +179,56 @@ class ParserService:
         }
         return mapping.get(status_name)
 
-    def update_student(self, item: Dict) -> Optional[Student]:
+    def update_or_create_student(self, item: Dict, group_config: Dict) -> Optional[Student]:
+        """Обновляет существующего или создает нового студента"""
         try:
-            if not self.group_info:
-                logger.error("❌ Нет информации о группе")
-                return None
-            russian_id = item.get('Идентификатор') or item.get('Абитуриент') or item.get('УникальныйКодПоступающего')
+            # Получаем ID абитуриента
+            russian_id = item.get('Абитуриент') or item.get('УникальныйКодПоступающего')
             if not russian_id:
                 logger.warning("⚠️ Нет ID абитуриента")
                 return None
 
-            # Ищем студента ТОЛЬКО среди существующих по russian_student_id
+            # Ищем студента
             student = self.db.query(Student).filter(
                 Student.russian_student_id == int(russian_id)
             ).first()
 
-            # Если студент не найден в БД - пропускаем (не создаем)
+            # Получаем или создаем связанные записи
+            department = self._get_or_create_department(
+                group_config['department_name'],
+                group_config.get('faculty_name')
+            )
+
+            speciality = self._get_or_create_speciality(
+                group_config['speciality_name'],
+                department.id
+            )
+
+            profile = self._get_or_create_profile(
+                group_config['profile_name'],
+                speciality.id
+            )
+
+            # Если студент не найден - создаем нового
+            is_new = False
             if not student:
-                self.stats["students_skipped"] += 1
-                logger.debug(f"⏭️ Пропущен студент с ID {russian_id} (нет в БД)")
-                return None
+                logger.info(f"➕ Создание нового студента с ID {russian_id}")
+                is_new = True
+                student = Student(
+                    russian_student_id=int(russian_id),
+                    full_name=item.get('ФИО') or item.get('АбитуриентФИО') or f"Студент {russian_id}",
+                    status=StudentStatus.ACTIVE,
+                    contact_status=ContactStatus.NEW
+                )
+                self.db.add(student)
+                self.db.flush()
 
-            logger.info(f"🔄 Обновление студента ID {russian_id} ({student.full_name})")
+            logger.info(f"{'🆕 Создание' if is_new else '🔄 Обновление'} студента ID {russian_id}")
 
-            # Обновляем ID из загруженной информации о группе
-            student.department_id = self.group_info['department_id']
-            student.speciality_id = self.group_info['speciality_id']
-            if self.group_info.get('profile_id'):
-                student.profile_id = self.group_info['profile_id']
-
-            # Маппинг Enum полей - используем Enum, а не строки
-            level_name = item.get('УровеньПодготовки', {}).get('name') if item.get('УровеньПодготовки') else None
-            if level_name:
-                study_level = self.map_study_level(level_name)
-                if study_level:
-                    student.study_level = study_level
-
-            form_name = item.get('ФормаОбучения', {}).get('name') if item.get('ФормаОбучения') else None
-            if form_name:
-                study_form = self.map_study_form(form_name)
-                if study_form:
-                    student.study_form = study_form
-
-            basis_name = item.get('ОснованиеПоступления', {}).get('name') if item.get('ОснованиеПоступления') else None
-            if basis_name:
-                study_basis = self.map_study_basis(basis_name)
-                if study_basis:
-                    student.study_basis = study_basis
+            # Обновляем ID из конфигурации группы
+            student.department_id = department.id
+            student.speciality_id = speciality.id
+            student.profile_id = profile.id
 
             # Позиция и приоритет
             student.position = item.get('Место') or item.get('Место в конкурсе')
@@ -235,7 +236,11 @@ class ParserService:
             student.participation = item.get('Участие в конкурсе') == 'Да' if item.get('Участие в конкурсе') else True
 
             # Статус заявления
-            status_name = item.get('Состояние заявления') or item.get('СостояниеЗаявления', {}).get('name', '')
+            status_data = item.get('СостояниеЗаявления', {})
+            status_name = status_data.get('name') if isinstance(status_data, dict) else status_data
+            if not status_name:
+                status_name = item.get('Состояние заявления')
+
             app_status = self.map_application_status(status_name)
             if app_status:
                 student.application_status = app_status
@@ -244,27 +249,16 @@ class ParserService:
             consent = item.get('Согласие на зачисление') or item.get('СогласиеНаЗачисление')
             student.consent_status = consent == 'Да' if consent else False
 
-            # Сумма баллов - пробуем разные варианты
+            # Сумма баллов
             total_score = None
-
-            # Вариант 1: прямое поле "Сумма баллов"
-            if item.get('Сумма баллов') is not None:
+            if item.get('СуммаБаллов') is not None:
+                total_score = item.get('СуммаБаллов')
+            elif item.get('Сумма баллов') is not None:
                 total_score = item.get('Сумма баллов')
-            # Вариант 2: поле "Баллы"
-            elif item.get('Баллы') is not None:
-                total_score = item.get('Баллы')
-            # Вариант 3: сумма из вступительных испытаний и индивидуальных достижений
             elif item.get('БалловЗаВИ') is not None or item.get('БалловЗаИД') is not None:
                 exam_score = item.get('БалловЗаВИ', 0)
                 id_score = item.get('БалловЗаИД', 0)
                 total_score = exam_score + id_score
-            # Вариант 4: из вложенных объектов
-            elif item.get('Вступительные испытания') is not None:
-                exam_data = item.get('Вступительные испытания')
-                if isinstance(exam_data, (int, float)):
-                    total_score = exam_data
-                elif isinstance(exam_data, dict):
-                    total_score = exam_data.get('сумма', 0) or exam_data.get('балл', 0)
 
             if total_score is not None:
                 try:
@@ -275,86 +269,193 @@ class ParserService:
             student.imported_at = datetime.utcnow()
             student.updated_at = datetime.utcnow()
 
-            # Сохраняем сразу для каждого студента
+            # Сохраняем
             self.db.commit()
             self.db.refresh(student)
 
-            self.stats["students_updated"] += 1
-            logger.info(f"✅ Обновлен студент {russian_id}: место={student.position}, баллы={student.total_score}, "
-                        f"department_id={student.department_id}, speciality_id={student.speciality_id}")
-            return student
+            return student, is_new
 
         except Exception as e:
-            self.stats["errors"] += 1
-            logger.error(f"❌ Ошибка обновления студента {russian_id if 'russian_id' in locals() else 'unknown'}: {e}")
+            logger.error(f"❌ Ошибка обработки студента {russian_id if 'russian_id' in locals() else 'unknown'}: {e}")
             import traceback
             traceback.print_exc()
-            # Откатываем транзакцию при ошибке
             self.db.rollback()
-            return None
+            return None, False
+
+    def calculate_group_statistics(self, group_config: Dict) -> Dict[str, Any]:
+        """Рассчитывает статистику по группе после парсинга"""
+        try:
+            # Получаем department, speciality, profile по названиям
+            department = self.db.query(Department).filter(
+                Department.name == group_config['department_name']
+            ).first()
+
+            if not department:
+                return {
+                    "total_students": 0,
+                    "applications_submitted": 0,
+                    "enrolled": 0,
+                    "average_score": 0,
+                    "min_score": 0,
+                    "max_score": 0
+                }
+
+            speciality = self.db.query(Speciality).filter(
+                Speciality.name == group_config['speciality_name'],
+                Speciality.department_id == department.id
+            ).first()
+
+            if not speciality:
+                return {
+                    "total_students": 0,
+                    "applications_submitted": 0,
+                    "enrolled": 0,
+                    "average_score": 0,
+                    "min_score": 0,
+                    "max_score": 0
+                }
+
+            profile = self.db.query(Profile).filter(
+                Profile.name == group_config['profile_name'],
+                Profile.speciality_id == speciality.id
+            ).first()
+
+            # Базовый запрос
+            query = self.db.query(Student).filter(
+                Student.department_id == department.id,
+                Student.speciality_id == speciality.id
+            )
+
+            if profile:
+                query = query.filter(Student.profile_id == profile.id)
+
+            students = query.all()
+
+            # Подсчет статистики
+            total_students = len(students)
+
+            # Подавшие документы (статус не PENDING или есть баллы)
+            applications_submitted = len(
+                [s for s in students if s.application_status != ApplicationStatus.PENDING or s.total_score])
+
+            # Поступившие (зачисленные)
+            enrolled = len([s for s in students if s.application_status == ApplicationStatus.ACCEPTED])
+
+            # Баллы
+            scores = [s.total_score for s in students if s.total_score and s.total_score > 0]
+            avg_score = sum(scores) / len(scores) if scores else 0
+            min_score = min(scores) if scores else 0
+            max_score = max(scores) if scores else 0
+
+            return {
+                "total_students": total_students,
+                "applications_submitted": applications_submitted,
+                "enrolled": enrolled,
+                "average_score": round(avg_score, 2),
+                "min_score": min_score,
+                "max_score": max_score
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка расчета статистики: {e}")
+            return {
+                "total_students": 0,
+                "applications_submitted": 0,
+                "enrolled": 0,
+                "average_score": 0,
+                "min_score": 0,
+                "max_score": 0
+            }
 
     def run_parser(self) -> Dict:
-        """Запускает парсинг и обновляет ТОЛЬКО существующих студентов"""
+        """Запускает парсинг для всех настроенных групп"""
         logger.info("=" * 60)
         logger.info("🚀 ЗАПУСК ПАРСЕРА АБИТУРИЕНТОВ")
         logger.info("=" * 60)
 
-        # Проверяем, загружена ли информация о группе
-        if not self.group_info:
-            logger.error("❌ Не удалось загрузить информацию о группе из БД")
-            return self.stats
+        for group_config in GROUPS_CONFIG:
+            logger.info(f"\n📌 Парсинг группы: {group_config['name']}")
+            logger.info(f"   Профиль: {group_config['profile_name']}")
+            logger.info("-" * 40)
 
-        logger.info(f"\n📌 Парсинг группы: {self.group_info['name']}")
-        logger.info("-" * 40)
+            group_stats = {
+                "students_updated": 0,
+                "students_created": 0,
+                "students_skipped": 0,
+                "errors": 0
+            }
 
-        # Получаем данные
-        data = self.fetch_group_data()
-        if not data or 'data' not in data:
-            logger.error(f"❌ Нет данных для группы")
-            return self.stats
+            # Получаем данные
+            data = self.fetch_group_data(group_config['uid'])
+            if not data or 'data' not in data:
+                logger.error(f"❌ Нет данных для группы {group_config['name']}")
+                continue
 
-        students_data = data['data']
-        logger.info(f"📊 В API: {len(students_data)} абитуриентов")
+            students_data = data['data']
+            logger.info(f"📊 В API: {len(students_data)} абитуриентов")
 
-        # Обновляем каждого студента
-        updated_count = 0
-        skipped_count = 0
+            # Обрабатываем каждого студента
+            for i, item in enumerate(students_data, 1):
+                try:
+                    student, is_new = self.update_or_create_student(item, group_config)
+                    if student:
+                        if is_new:
+                            group_stats["students_created"] += 1
+                        else:
+                            group_stats["students_updated"] += 1
+                    else:
+                        group_stats["students_skipped"] += 1
+                except Exception as e:
+                    logger.error(f"❌ Ошибка при обработке студента: {e}")
+                    group_stats["errors"] += 1
+                    self.db.rollback()
 
-        for i, item in enumerate(students_data, 1):
-            try:
-                result = self.update_student(item)
-                if result:
-                    updated_count += 1
-                else:
-                    russian_id = item.get('Идентификатор') or item.get('Абитуриент') or item.get(
-                        'УникальныйКодПоступающего')
-                    if russian_id:
-                        exists = self.db.query(Student).filter(
-                            Student.russian_student_id == int(russian_id)
-                        ).first()
-                        if not exists:
-                            skipped_count += 1
-            except Exception as e:
-                logger.error(f"❌ Ошибка при обработке студента: {e}")
-                self.stats["errors"] += 1
-                self.db.rollback()
+                if i % 50 == 0:
+                    logger.info(f"⏳ Обработано {i}/{len(students_data)}...")
 
-            if i % 50 == 0:
-                logger.info(f"⏳ Обработано {i}/{len(students_data)}...")
+            # Рассчитываем статистику по группе
+            group_statistics = self.calculate_group_statistics(group_config)
 
-        self.stats["students_updated"] = updated_count
-        self.stats["students_skipped"] = skipped_count
+            # Сохраняем статистику группы
+            self.all_stats["groups"][group_config['name']] = {
+                "config": group_config,
+                "parser_stats": group_stats,
+                "statistics": group_statistics
+            }
 
-        logger.info(f"✅ Обновлено: {updated_count}, Пропущено (нет в БД): {skipped_count}")
+            # Обновляем общую статистику
+            self.all_stats["total"]["students_updated"] += group_stats["students_updated"]
+            self.all_stats["total"]["students_created"] += group_stats["students_created"]
+            self.all_stats["total"]["students_skipped"] += group_stats["students_skipped"]
+            self.all_stats["total"]["errors"] += group_stats["errors"]
 
+            # Выводим статистику по группе
+            logger.info(f"\n📊 СТАТИСТИКА ГРУППЫ '{group_config['name']}':")
+            logger.info(f"   Создано студентов: {group_stats['students_created']}")
+            logger.info(f"   Обновлено студентов: {group_stats['students_updated']}")
+            logger.info(f"   Пропущено: {group_stats['students_skipped']}")
+            logger.info(f"   Ошибок: {group_stats['errors']}")
+            logger.info(f"\n📈 АНАЛИТИКА ПО ГРУППЕ:")
+            logger.info(f"   Всего студентов в БД: {group_statistics['total_students']}")
+            logger.info(f"   Подало документы: {group_statistics['applications_submitted']}")
+            logger.info(f"   Поступило (зачислено): {group_statistics['enrolled']}")
+            logger.info(f"   Средний балл: {group_statistics['average_score']}")
+            logger.info(f"   Минимальный балл: {group_statistics['min_score']}")
+            logger.info(f"   Максимальный балл: {group_statistics['max_score']}")
+
+            # Коммитим изменения после каждой группы
+            self.db.commit()
+
+        # Итоговая статистика
         logger.info("\n" + "=" * 60)
-        logger.info("📊 СТАТИСТИКА:")
-        logger.info(f"   Обновлено студентов: {self.stats['students_updated']}")
-        logger.info(f"   Пропущено студентов (нет в БД): {self.stats['students_skipped']}")
-        logger.info(f"   Ошибок: {self.stats['errors']}")
+        logger.info("📊 ИТОГОВАЯ СТАТИСТИКА ПО ВСЕМ ГРУППАМ:")
+        logger.info(f"   Всего создано студентов: {self.all_stats['total']['students_created']}")
+        logger.info(f"   Всего обновлено студентов: {self.all_stats['total']['students_updated']}")
+        logger.info(f"   Всего пропущено: {self.all_stats['total']['students_skipped']}")
+        logger.info(f"   Всего ошибок: {self.all_stats['total']['errors']}")
         logger.info("=" * 60)
 
-        return self.stats
+        return self.all_stats
 
 
 def run_parser_once():
