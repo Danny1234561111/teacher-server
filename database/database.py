@@ -151,7 +151,7 @@ def ensure_schema_up_to_date():
         if 'active_contact' not in existing_columns:
             print("➕ Добавление поля active_contact...")
             with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN active_contact VARCHAR(255) NULL"))
+                conn.execute(text("ALTER TABLE users ADD COLUMN active_contact VARCHAR(500) NULL"))
                 conn.commit()
             print("✅ Поле active_contact добавлено")
         else:

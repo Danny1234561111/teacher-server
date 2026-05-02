@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from services.admin_service import AdminService
 from services.auth_service import AuthService
 from database.database import get_db
-from database.schema import User
+from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus
 
 router = APIRouter(tags=["Administration"])
 security = HTTPBearer()
@@ -24,7 +24,6 @@ class UserCreate(BaseModel):
     full_name: str = Field(..., min_length=2)
     role: str = Field(..., pattern="^(admin|teacher|student)$")
     phone: Optional[str] = None
-    # УБРАНО: max_students: Optional[int] = 20
 
 
 class UserResponse(BaseModel):
@@ -34,7 +33,6 @@ class UserResponse(BaseModel):
     phone: Optional[str]
     role: str
     is_active: bool
-    # УБРАНО: max_students: Optional[int]
 
 
 class DepartmentCreate(BaseModel):
@@ -161,6 +159,126 @@ async def get_system_stats(
     return admin_service.get_system_stats(db)
 
 
+# ===== НОВЫЙ ЭНДПОИНТ ДЛЯ СТАТИСТИКИ ПО ГРУППАМ =====
+
+@router.get("/groups-statistics")
+async def get_groups_statistics(
+        admin: User = Depends(get_current_admin),
+        db: Session = Depends(get_db)
+):
+    """Получение статистики по конкурсным группам (Разработка, Дизайн и т.д.)"""
+
+    # Конфигурация групп
+    groups_config = [
+        {
+            "name": "Разработка",
+            "department_name": "Информатика и вычислительная техника",
+            "speciality_name": "Прикладная информатика",
+            "profile_name": "Прикладная информатика в разработке"
+        },
+        {
+            "name": "Дизайн",
+            "department_name": "Факультет бизнес-коммуникаций и информатики",
+            "speciality_name": "Прикладная информатика",
+            "profile_name": "Прикладная информатика в дизайне"
+        }
+    ]
+
+    result = {}
+
+    for group_config in groups_config:
+        # Получаем department
+        department = db.query(Department).filter(
+            Department.name == group_config["department_name"]
+        ).first()
+
+        if not department:
+            result[group_config["name"]] = {
+                "name": group_config["name"],
+                "profile_name": group_config["profile_name"],
+                "total_applications": 0,
+                "applications_submitted": 0,
+                "enrolled": 0,
+                "average_score": 0,
+                "min_score": 0,
+                "max_score": 0,
+                "error": f"Направление '{group_config['department_name']}' не найдено"
+            }
+            continue
+
+        # Получаем speciality
+        speciality = db.query(Speciality).filter(
+            Speciality.name == group_config["speciality_name"],
+            Speciality.department_id == department.id
+        ).first()
+
+        if not speciality:
+            result[group_config["name"]] = {
+                "name": group_config["name"],
+                "profile_name": group_config["profile_name"],
+                "total_applications": 0,
+                "applications_submitted": 0,
+                "enrolled": 0,
+                "average_score": 0,
+                "min_score": 0,
+                "max_score": 0,
+                "error": f"Специальность '{group_config['speciality_name']}' не найдена"
+            }
+            continue
+
+        # Получаем profile
+        profile = db.query(Profile).filter(
+            Profile.name == group_config["profile_name"],
+            Profile.speciality_id == speciality.id
+        ).first()
+
+        # Запрос к заявлениям
+        query = db.query(StudentApplication).filter(
+            StudentApplication.department_id == department.id,
+            StudentApplication.speciality_id == speciality.id
+        )
+
+        if profile:
+            query = query.filter(StudentApplication.profile_id == profile.id)
+
+        applications = query.all()
+
+        # Подсчет статистики
+        total_applications = len(applications)
+
+        # Подавшие документы (статус не PENDING или есть баллы)
+        applications_submitted = len([
+            a for a in applications
+            if a.application_status != ApplicationStatus.PENDING or a.total_score
+        ])
+
+        # Поступившие (зачисленные)
+        enrolled = len([a for a in applications if a.application_status == ApplicationStatus.ACCEPTED])
+
+        # Баллы
+        scores = [a.total_score for a in applications if a.total_score and a.total_score > 0]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        min_score = min(scores) if scores else 0
+        max_score = max(scores) if scores else 0
+
+        result[group_config["name"]] = {
+            "name": group_config["name"],
+            "profile_name": group_config["profile_name"],
+            "department_name": department.name,
+            "speciality_name": speciality.name,
+            "profile_id": profile.id if profile else None,
+            "total_applications": total_applications,
+            "applications_submitted": applications_submitted,
+            "enrolled": enrolled,
+            "average_score": round(avg_score, 2),
+            "min_score": min_score,
+            "max_score": max_score,
+            "unique_students_count": len(set(a.student_id for a in applications))
+        }
+
+    return result
+
+
 # ===== ДОБАВЛЕНИЕ =====
 
 @router.post("/users", status_code=201, response_model=UserResponse)
@@ -265,25 +383,3 @@ async def delete_profile(
         raise HTTPException(status_code=404, detail="Профиль не найден")
 
     return {"message": "Профиль удален"}
-
-@router.get("/statistics")
-async def get_statistics(
-        current_user: Dict[str, Any] = Depends(get_current_admin),
-        db: Session = Depends(get_db)
-):
-    """Получение статистики по абитуриентам"""
-    from services.parser_service import GROUPS_CONFIG
-    from services.parser_service import ParserService
-
-    parser = ParserService(db)
-
-    stats = {}
-    for group_config in GROUPS_CONFIG:
-        group_stats = parser.calculate_group_statistics(group_config)
-        stats[group_config['name']] = {
-            "name": group_config['name'],
-            "profile_name": group_config['profile_name'],
-            **group_stats
-        }
-
-    return stats

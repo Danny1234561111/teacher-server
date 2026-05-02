@@ -1,5 +1,5 @@
 # database/schema.py
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON, Enum
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON, Enum, Float
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 import enum
@@ -92,7 +92,7 @@ class Department(Base):
     faculty = Column(String, nullable=False)
 
     specialities = relationship("Speciality", back_populates="department", cascade="all, delete-orphan")
-    students = relationship("Student", back_populates="department")
+    applications = relationship("StudentApplication", back_populates="department")
 
 
 # Модель Speciality (Специальности)
@@ -106,7 +106,7 @@ class Speciality(Base):
 
     department = relationship("Department", back_populates="specialities")
     profiles = relationship("Profile", back_populates="speciality", cascade="all, delete-orphan")
-    students = relationship("Student", back_populates="speciality")
+    applications = relationship("StudentApplication", back_populates="speciality")
 
 
 # Модель Profile (Профили/Программы внутри специальности)
@@ -132,10 +132,44 @@ class Profile(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     speciality = relationship("Speciality", back_populates="profiles")
-    students = relationship("Student", back_populates="profile")
+    applications = relationship("StudentApplication", back_populates="profile")
 
 
-# Модель Student (Абитуриент)
+# Модель StudentApplication (Заявление абитуриента на специальность) - НОВАЯ
+class StudentApplication(Base):
+    """Заявление абитуриента на конкретную конкурсную группу (многие ко многим)"""
+    __tablename__ = "student_applications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("students.id"), nullable=False)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
+    speciality_id = Column(Integer, ForeignKey("specialities.id"), nullable=False)
+    profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=True)
+
+    # Конкурсная информация по этой специальности
+    position = Column(Integer, nullable=True)  # Место в конкурсе
+    priority = Column(Integer, nullable=True)  # Приоритет заявления
+    is_main_contest = Column(Boolean, default=False)  # Основной конкурс
+    participation = Column(Boolean, default=True)  # Участие в конкурсе
+    consent_status = Column(Boolean, default=False)  # Согласие на зачисление
+    application_status = Column(Enum(ApplicationStatus), default=ApplicationStatus.PENDING)
+    total_score = Column(Integer, nullable=True)  # Баллы по этой специальности
+
+    # Данные из API
+    main_contest_other = Column(String, nullable=True)
+    higher_priority_other = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Связи
+    student = relationship("Student", back_populates="applications")
+    department = relationship("Department", back_populates="applications")
+    speciality = relationship("Speciality", back_populates="applications")
+    profile = relationship("Profile", back_populates="applications")
+
+
+# Модель Student (Абитуриент) - ОБНОВЛЕНА
 class Student(Base):
     __tablename__ = "students"
 
@@ -146,42 +180,39 @@ class Student(Base):
     additional_contacts = Column(JSON, nullable=True)
     prior_contact = Column(Enum(PriorContact), nullable=True)
 
+    # ОСНОВНАЯ специальность (для обратной совместимости, рекомендуется использовать applications)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     speciality_id = Column(Integer, ForeignKey("specialities.id"), nullable=True)
     profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=True)
+
+    # Общая информация (не зависит от специальности)
     study_level = Column(Enum(StudyLevel), nullable=True)
     study_form = Column(Enum(StudyForm), nullable=True)
     study_basis = Column(Enum(StudyBasis), nullable=True)
 
-    position = Column(Integer, nullable=True)
-    priority = Column(Integer, nullable=True)
-    is_main_contest = Column(Boolean, nullable=True)
-    participation = Column(Boolean, default=True)
-    main_contest_other = Column(String, nullable=True)
-    higher_priority_other = Column(String, nullable=True)
-
+    # Общие статусы
     status = Column(Enum(StudentStatus), default=StudentStatus.ACTIVE)
-    application_status = Column(Enum(ApplicationStatus), default=ApplicationStatus.PENDING)
     contact_status = Column(Enum(ContactStatus), default=ContactStatus.NEW)
     contact_type = Column(Enum(ContactType), nullable=True)
-    consent_status = Column(Boolean, nullable=True)
 
-    total_score = Column(Integer, nullable=True)
     last_communication_date = Column(DateTime, nullable=True)
-
     imported_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     kurator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
+    # Связи
+    applications = relationship("StudentApplication", back_populates="student", cascade="all, delete-orphan")
     communications = relationship("Communication", back_populates="student", cascade="all, delete-orphan")
     kurator = relationship("User", foreign_keys=[kurator_id], back_populates="kurator_students")
-    department = relationship("Department", foreign_keys=[department_id], back_populates="students")
-    speciality = relationship("Speciality", foreign_keys=[speciality_id], back_populates="students")
-    profile = relationship("Profile", foreign_keys=[profile_id], back_populates="students")
+
+    # Для обратной совместимости (основная специальность)
+    department = relationship("Department", foreign_keys=[department_id])
+    speciality = relationship("Speciality", foreign_keys=[speciality_id])
+    profile = relationship("Profile", foreign_keys=[profile_id])
 
 
-# Модель User (Пользователи) - ДОБАВЛЕНЫ ПОЛЯ ДЛЯ АКТИВНОГО КОНТАКТА
+# Модель User (Пользователи)
 class User(Base):
     __tablename__ = "users"
 
@@ -197,8 +228,8 @@ class User(Base):
     assigned_specialities = Column(JSON, default=list)
     assigned_profiles = Column(JSON, default=list)
 
-    # НОВЫЕ ПОЛЯ ДЛЯ АКТИВНОГО КОНТАКТА
-    active_contact = Column(String(255), nullable=True)
+    # Поля для активного контакта
+    active_contact = Column(String(500), nullable=True)
     active_contact_type = Column(String(50), nullable=True)
     active_contact_updated_at = Column(DateTime, nullable=True)
 

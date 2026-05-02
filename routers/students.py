@@ -573,3 +573,4 @@ async def get_communication_stats(
         db=db,
         days_back=days_back
     )
+

@@ -7,9 +7,9 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from database.schema import (
-    Student, Department, Speciality, Profile,
+    Student, Department, Speciality, Profile, StudentApplication,
     StudyLevel, StudyForm, StudyBasis,
-    ApplicationStatus, StudentStatus, ContactStatus
+    ApplicationStatus, StudentStatus, ContactStatus, PriorContact
 )
 
 # Настройка логирования
@@ -43,7 +43,7 @@ GROUPS_CONFIG = [
         "study_basis": "Бюджетная основа"
     },
     {
-        "uid": "8d51d4dd-134e-11f0-8122-82761dd90eed",  # Тот же UID? Возможно, нужно другой
+        "uid": "8d51d4dd-134e-11f0-8122-82761dd90eed",
         "name": "Дизайн",
         "department_name": "Факультет бизнес-коммуникаций и информатики",
         "speciality_name": "Прикладная информатика",
@@ -56,7 +56,7 @@ GROUPS_CONFIG = [
 
 
 class ParserService:
-    """Сервис для парсинга данных абитуриентов - ОБНОВЛЕНИЕ И СТАТИСТИКА"""
+    """Сервис для парсинга данных абитуриентов - поддержка множественных заявлений"""
 
     def __init__(self, db: Session):
         self.db = db
@@ -179,20 +179,31 @@ class ParserService:
         }
         return mapping.get(status_name)
 
-    def update_or_create_student(self, item: Dict, group_config: Dict) -> Optional[Student]:
-        """Обновляет существующего или создает нового студента"""
+    def _get_full_name(self, item: Dict) -> str:
+        """Извлекает полное имя из данных API"""
+        # Пробуем разные варианты
+        name = item.get('ФИО')
+        if name:
+            return name
+
+        name = item.get('АбитуриентФИО')
+        if name:
+            return name
+
+        # Составляем из частей
+        last_name = item.get('Фамилия', '')
+        first_name = item.get('Имя', '')
+        middle_name = item.get('Отчество', '')
+
+        if last_name or first_name:
+            return f"{last_name} {first_name} {middle_name}".strip()
+
+        return f"Студент {item.get('Абитуриент', '')}"
+
+    def update_or_create_application(self, item: Dict, group_config: Dict, student: Student) -> Optional[
+        StudentApplication]:
+        """Обновляет или создает заявление студента на конкретную специальность"""
         try:
-            # Получаем ID абитуриента
-            russian_id = item.get('Абитуриент') or item.get('УникальныйКодПоступающего')
-            if not russian_id:
-                logger.warning("⚠️ Нет ID абитуриента")
-                return None
-
-            # Ищем студента
-            student = self.db.query(Student).filter(
-                Student.russian_student_id == int(russian_id)
-            ).first()
-
             # Получаем или создаем связанные записи
             department = self._get_or_create_department(
                 group_config['department_name'],
@@ -209,31 +220,53 @@ class ParserService:
                 speciality.id
             )
 
-            # Если студент не найден - создаем нового
+            # Ищем существующее заявление
+            application = self.db.query(StudentApplication).filter(
+                StudentApplication.student_id == student.id,
+                StudentApplication.department_id == department.id,
+                StudentApplication.speciality_id == speciality.id,
+                StudentApplication.profile_id == profile.id
+            ).first()
+
             is_new = False
-            if not student:
-                logger.info(f"➕ Создание нового студента с ID {russian_id}")
+            if not application:
+                logger.debug(f"   ➕ Создание заявления на {group_config['profile_name']}")
                 is_new = True
-                student = Student(
-                    russian_student_id=int(russian_id),
-                    full_name=item.get('ФИО') or item.get('АбитуриентФИО') or f"Студент {russian_id}",
-                    status=StudentStatus.ACTIVE,
-                    contact_status=ContactStatus.NEW
+                application = StudentApplication(
+                    student_id=student.id,
+                    department_id=department.id,
+                    speciality_id=speciality.id,
+                    profile_id=profile.id
                 )
-                self.db.add(student)
+                self.db.add(application)
                 self.db.flush()
 
-            logger.info(f"{'🆕 Создание' if is_new else '🔄 Обновление'} студента ID {russian_id}")
+            # Обновляем конкурсную информацию
+            # Место в конкурсе
+            position = item.get('Место') or item.get('Место в конкурсе')
+            if position is not None:
+                try:
+                    application.position = int(position)
+                except (ValueError, TypeError):
+                    pass
 
-            # Обновляем ID из конфигурации группы
-            student.department_id = department.id
-            student.speciality_id = speciality.id
-            student.profile_id = profile.id
+            # Приоритет
+            priority = item.get('Приоритет')
+            if priority is not None:
+                try:
+                    application.priority = int(priority)
+                except (ValueError, TypeError):
+                    pass
 
-            # Позиция и приоритет
-            student.position = item.get('Место') or item.get('Место в конкурсе')
-            student.priority = item.get('Приоритет')
-            student.participation = item.get('Участие в конкурсе') == 'Да' if item.get('Участие в конкурсе') else True
+            # Участие в конкурсе
+            participation = item.get('Участие в конкурсе')
+            if participation is not None:
+                application.participation = participation == 'Да'
+
+            # Основной конкурс
+            is_main_contest = item.get('ОсновнойКонкурс')
+            if is_main_contest is not None:
+                application.is_main_contest = is_main_contest == 'Да'
 
             # Статус заявления
             status_data = item.get('СостояниеЗаявления', {})
@@ -243,11 +276,11 @@ class ParserService:
 
             app_status = self.map_application_status(status_name)
             if app_status:
-                student.application_status = app_status
+                application.application_status = app_status
 
             # Согласие на зачисление
             consent = item.get('Согласие на зачисление') or item.get('СогласиеНаЗачисление')
-            student.consent_status = consent == 'Да' if consent else False
+            application.consent_status = consent == 'Да' if consent else False
 
             # Сумма баллов
             total_score = None
@@ -262,18 +295,76 @@ class ParserService:
 
             if total_score is not None:
                 try:
-                    student.total_score = int(total_score)
+                    application.total_score = int(total_score)
                 except (ValueError, TypeError):
                     logger.warning(f"⚠️ Не удалось преобразовать баллы: {total_score}")
 
+            # Дополнительные поля
+            application.main_contest_other = item.get('ОсновнойКонкурсДругое')
+            application.higher_priority_other = item.get('ВысшийПриоритетДругое')
+            application.updated_at = datetime.utcnow()
+
+            return application, is_new
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка обработки заявления: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, False
+
+    def update_or_create_student(self, item: Dict, group_config: Dict) -> Optional[Student]:
+        """Обновляет существующего или создает нового студента"""
+        try:
+            # Получаем ID абитуриента
+            russian_id = item.get('Абитуриент') or item.get('УникальныйКодПоступающего')
+            if not russian_id:
+                logger.warning("⚠️ Нет ID абитуриента")
+                return None
+
+            # Ищем студента
+            student = self.db.query(Student).filter(
+                Student.russian_student_id == int(russian_id)
+            ).first()
+
+            # Если студент не найден - создаем нового
+            is_new_student = False
+            if not student:
+                logger.info(f"➕ Создание нового студента с ID {russian_id}")
+                is_new_student = True
+                student = Student(
+                    russian_student_id=int(russian_id),
+                    full_name=self._get_full_name(item),
+                    status=StudentStatus.ACTIVE,
+                    contact_status=ContactStatus.NEW
+                )
+                self.db.add(student)
+                self.db.flush()
+            else:
+                # Обновляем ФИО если оно изменилось
+                current_name = self._get_full_name(item)
+                if student.full_name != current_name and current_name != f"Студент {russian_id}":
+                    student.full_name = current_name
+
+            logger.info(f"{'🆕 Создание' if is_new_student else '🔄 Обновление'} студента ID {russian_id}")
+
+            # Обновляем или создаем заявление на эту специальность
+            application, is_new_application = self.update_or_create_application(item, group_config, student)
+
+            if application:
+                if is_new_application:
+                    logger.debug(f"   ✅ Добавлено заявление на {group_config['profile_name']}")
+                else:
+                    logger.debug(
+                        f"   ✅ Обновлено заявление на {group_config['profile_name']} (место: {application.position})")
+
+            # Обновляем общую информацию студента (если нужно)
             student.imported_at = datetime.utcnow()
             student.updated_at = datetime.utcnow()
 
-            # Сохраняем
             self.db.commit()
             self.db.refresh(student)
 
-            return student, is_new
+            return student, is_new_student
 
         except Exception as e:
             logger.error(f"❌ Ошибка обработки студента {russian_id if 'russian_id' in locals() else 'unknown'}: {e}")
@@ -283,7 +374,7 @@ class ParserService:
             return None, False
 
     def calculate_group_statistics(self, group_config: Dict) -> Dict[str, Any]:
-        """Рассчитывает статистику по группе после парсинга"""
+        """Рассчитывает статистику по группе на основе заявлений"""
         try:
             # Получаем department, speciality, profile по названиям
             department = self.db.query(Department).filter(
@@ -291,14 +382,7 @@ class ParserService:
             ).first()
 
             if not department:
-                return {
-                    "total_students": 0,
-                    "applications_submitted": 0,
-                    "enrolled": 0,
-                    "average_score": 0,
-                    "min_score": 0,
-                    "max_score": 0
-                }
+                return self._empty_statistics()
 
             speciality = self.db.query(Speciality).filter(
                 Speciality.name == group_config['speciality_name'],
@@ -306,49 +390,44 @@ class ParserService:
             ).first()
 
             if not speciality:
-                return {
-                    "total_students": 0,
-                    "applications_submitted": 0,
-                    "enrolled": 0,
-                    "average_score": 0,
-                    "min_score": 0,
-                    "max_score": 0
-                }
+                return self._empty_statistics()
 
             profile = self.db.query(Profile).filter(
                 Profile.name == group_config['profile_name'],
                 Profile.speciality_id == speciality.id
             ).first()
 
-            # Базовый запрос
-            query = self.db.query(Student).filter(
-                Student.department_id == department.id,
-                Student.speciality_id == speciality.id
+            # Базовый запрос - ищем заявления
+            query = self.db.query(StudentApplication).filter(
+                StudentApplication.department_id == department.id,
+                StudentApplication.speciality_id == speciality.id
             )
 
             if profile:
-                query = query.filter(Student.profile_id == profile.id)
+                query = query.filter(StudentApplication.profile_id == profile.id)
 
-            students = query.all()
+            applications = query.all()
 
             # Подсчет статистики
-            total_students = len(students)
+            total_applications = len(applications)
 
             # Подавшие документы (статус не PENDING или есть баллы)
-            applications_submitted = len(
-                [s for s in students if s.application_status != ApplicationStatus.PENDING or s.total_score])
+            applications_submitted = len([
+                a for a in applications
+                if a.application_status != ApplicationStatus.PENDING or a.total_score
+            ])
 
             # Поступившие (зачисленные)
-            enrolled = len([s for s in students if s.application_status == ApplicationStatus.ACCEPTED])
+            enrolled = len([a for a in applications if a.application_status == ApplicationStatus.ACCEPTED])
 
             # Баллы
-            scores = [s.total_score for s in students if s.total_score and s.total_score > 0]
+            scores = [a.total_score for a in applications if a.total_score and a.total_score > 0]
             avg_score = sum(scores) / len(scores) if scores else 0
             min_score = min(scores) if scores else 0
             max_score = max(scores) if scores else 0
 
             return {
-                "total_students": total_students,
+                "total_applications": total_applications,
                 "applications_submitted": applications_submitted,
                 "enrolled": enrolled,
                 "average_score": round(avg_score, 2),
@@ -358,14 +437,18 @@ class ParserService:
 
         except Exception as e:
             logger.error(f"❌ Ошибка расчета статистики: {e}")
-            return {
-                "total_students": 0,
-                "applications_submitted": 0,
-                "enrolled": 0,
-                "average_score": 0,
-                "min_score": 0,
-                "max_score": 0
-            }
+            return self._empty_statistics()
+
+    def _empty_statistics(self) -> Dict[str, Any]:
+        """Пустая статистика"""
+        return {
+            "total_applications": 0,
+            "applications_submitted": 0,
+            "enrolled": 0,
+            "average_score": 0,
+            "min_score": 0,
+            "max_score": 0
+        }
 
     def run_parser(self) -> Dict:
         """Запускает парсинг для всех настроенных групп"""
@@ -382,6 +465,8 @@ class ParserService:
                 "students_updated": 0,
                 "students_created": 0,
                 "students_skipped": 0,
+                "applications_created": 0,
+                "applications_updated": 0,
                 "errors": 0
             }
 
@@ -436,7 +521,7 @@ class ParserService:
             logger.info(f"   Пропущено: {group_stats['students_skipped']}")
             logger.info(f"   Ошибок: {group_stats['errors']}")
             logger.info(f"\n📈 АНАЛИТИКА ПО ГРУППЕ:")
-            logger.info(f"   Всего студентов в БД: {group_statistics['total_students']}")
+            logger.info(f"   Всего заявлений: {group_statistics['total_applications']}")
             logger.info(f"   Подало документы: {group_statistics['applications_submitted']}")
             logger.info(f"   Поступило (зачислено): {group_statistics['enrolled']}")
             logger.info(f"   Средний балл: {group_statistics['average_score']}")
