@@ -11,7 +11,7 @@ from services.auth_service import AuthService
 from database.database import get_db
 from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus
 
-router = APIRouter(prefix="", tags=["Students"])
+router = APIRouter(prefix="/api/students", tags=["Students"])
 security = HTTPBearer()
 auth_service = AuthService()
 student_service = StudentService()
