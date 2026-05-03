@@ -1,3 +1,4 @@
+# routers/students.py
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
@@ -409,7 +410,6 @@ async def get_student(
 
 
 # ===== ЭНДПОИНТЫ ДЛЯ ЗАЯВЛЕНИЙ И КОНКУРСНОЙ ИНФОРМАЦИИ =====
-# ВАЖНО: пути без дублирования /api/students, так как router уже имеет prefix="/api/students"
 
 @router.get("/{student_id}/applications", response_model=List[StudentApplicationResponse])
 async def get_student_applications(
@@ -418,7 +418,6 @@ async def get_student_applications(
         db: Session = Depends(get_db)
 ):
     """Получение всех заявлений студента на специальности"""
-    # Проверяем доступ к студенту
     student = student_service.get_student_by_id(
         student_id=student_id,
         user_id=current_user.id,
@@ -467,7 +466,6 @@ async def get_student_competitive_info(
         db: Session = Depends(get_db)
 ):
     """Получение конкурсной информации по студенту (место, проходной балл, статистика)"""
-    # Проверяем доступ к студенту
     student = student_service.get_student_by_id(
         student_id=student_id,
         user_id=current_user.id,
@@ -476,7 +474,6 @@ async def get_student_competitive_info(
     if not student:
         raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
 
-    # Получаем основное заявление (с наивысшим приоритетом или первое)
     main_application = db.query(StudentApplication).filter(
         StudentApplication.student_id == student_id
     ).order_by(StudentApplication.priority.asc(), StudentApplication.id.asc()).first()
@@ -497,7 +494,6 @@ async def get_student_competitive_info(
             profile_name=None
         )
 
-    # Получаем всех студентов на той же специальности
     query = db.query(StudentApplication).filter(
         StudentApplication.department_id == main_application.department_id,
         StudentApplication.speciality_id == main_application.speciality_id
@@ -508,17 +504,14 @@ async def get_student_competitive_info(
 
     all_applications = query.all()
 
-    # Сортируем по баллам (по убыванию)
     sorted_apps = sorted(all_applications, key=lambda x: x.total_score or 0, reverse=True)
 
-    # Находим место текущего студента
     position = 1
     for i, app in enumerate(sorted_apps, 1):
         if app.student_id == student_id:
             position = i
             break
 
-    # Подсчет статистики
     total_students = len(all_applications)
     enrolled_count = len([a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED])
     submitted_count = len([a for a in all_applications if a.application_status != ApplicationStatus.PENDING])
@@ -528,7 +521,6 @@ async def get_student_competitive_info(
     min_score = min(scores) if scores else 0
     max_score = max(scores) if scores else 0
 
-    # Проходной балл (балл последнего зачисленного)
     passing_score = None
     if enrolled_count > 0:
         enrolled_apps = [a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED]
@@ -550,6 +542,107 @@ async def get_student_competitive_info(
         max_score=max_score,
         passing_score=passing_score,
         student_score=main_application.total_score,
+        department_name=department.name if department else None,
+        speciality_name=speciality.name if speciality else None,
+        profile_name=profile.name if profile else None
+    )
+
+
+# ===== НОВЫЙ ЭНДПОИНТ ДЛЯ КОНКУРСНОЙ ИНФОРМАЦИИ ПО КОНКРЕТНОЙ СПЕЦИАЛЬНОСТИ =====
+
+@router.get("/{student_id}/competitive-info/{speciality_id}", response_model=CompetitiveInfoResponse)
+async def get_student_competitive_info_for_speciality(
+        student_id: int,
+        speciality_id: int,
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """Получение конкурсной информации по студенту для конкретной специальности"""
+
+    # Проверяем доступ к студенту
+    student = student_service.get_student_by_id(
+        student_id=student_id,
+        user_id=current_user.id,
+        db=db
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
+
+    # Получаем заявление для указанной специальности
+    application = db.query(StudentApplication).filter(
+        StudentApplication.student_id == student_id,
+        StudentApplication.speciality_id == speciality_id
+    ).first()
+
+    if not application:
+        return CompetitiveInfoResponse(
+            position=None,
+            total_students=0,
+            total_enrolled=0,
+            total_submitted=0,
+            average_score=0,
+            min_score=0,
+            max_score=0,
+            passing_score=None,
+            student_score=None,
+            department_name=None,
+            speciality_name=None,
+            profile_name=None
+        )
+
+    # Получаем всех студентов на той же специальности
+    query = db.query(StudentApplication).filter(
+        StudentApplication.speciality_id == speciality_id
+    )
+
+    if application.profile_id:
+        query = query.filter(StudentApplication.profile_id == application.profile_id)
+
+    all_applications = query.all()
+
+    # Сортируем по баллам
+    sorted_apps = sorted(all_applications, key=lambda x: x.total_score or 0, reverse=True)
+
+    # Находим место текущего студента
+    position = 1
+    for i, app in enumerate(sorted_apps, 1):
+        if app.student_id == student_id:
+            position = i
+            break
+
+    # Подсчет статистики
+    total_students = len(all_applications)
+    enrolled_count = len([a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED])
+    submitted_count = len([a for a in all_applications if a.application_status != ApplicationStatus.PENDING])
+
+    scores = [a.total_score for a in all_applications if a.total_score and a.total_score > 0]
+    avg_score = sum(scores) / len(scores) if scores else 0
+    min_score = min(scores) if scores else 0
+    max_score = max(scores) if scores else 0
+
+    # Проходной балл (последний зачисленный)
+    passing_score = None
+    if enrolled_count > 0:
+        enrolled_apps = [a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED]
+        enrolled_sorted = sorted(enrolled_apps, key=lambda x: x.total_score or 0, reverse=True)
+        if enrolled_sorted:
+            passing_score = enrolled_sorted[-1].total_score
+
+    # Получаем названия
+    department = db.query(Department).filter(Department.id == application.department_id).first()
+    speciality = db.query(Speciality).filter(Speciality.id == speciality_id).first()
+    profile = db.query(Profile).filter(Profile.id == application.profile_id).first() if application.profile_id else None
+
+    return CompetitiveInfoResponse(
+        position=position,
+        total_students=total_students,
+        total_enrolled=enrolled_count,
+        total_submitted=submitted_count,
+        average_score=round(avg_score, 2),
+        min_score=min_score,
+        max_score=max_score,
+        passing_score=passing_score,
+        student_score=application.total_score,
         department_name=department.name if department else None,
         speciality_name=speciality.name if speciality else None,
         profile_name=profile.name if profile else None
