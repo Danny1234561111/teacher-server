@@ -24,25 +24,35 @@ class ActiveContactUpdate(BaseModel):
         contact_type = values.get('contact_type')
 
         if contact_type == 'url':
-            # Валидация URL
             url_pattern = re.compile(
-                r'^https?://'  # http:// или https://
-                r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # домен...
-                r'localhost|'  # localhost...
-                r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...или ip
-                r'(?::\d+)?'  # опциональный порт
+                r'^https?://'
+                r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'
+                r'localhost|'
+                r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+                r'(?::\d+)?'
                 r'(?:/?|[/?]\S+)$', re.IGNORECASE)
-
             if not url_pattern.match(v):
                 raise ValueError('Неверный формат URL')
 
         elif contact_type == 'telegram':
-            # Валидация Telegram username
-            if not v.startswith('@'):
-                raise ValueError('Telegram username должен начинаться с @')
+            # Telegram может быть как номером телефона, так и @username
+            # Проверяем, является ли значением номером телефона
+            phone_pattern = re.compile(r'^\+?[1-9]\d{10,14}$')
+            cleaned = re.sub(r'[\s\-\(\)]', '', v)
+
+            if phone_pattern.match(cleaned):
+                # Это номер телефона - валиден
+                return v
+            elif v.startswith('@'):
+                # Это username - валиден
+                if len(v) < 2:
+                    raise ValueError('Telegram username слишком короткий')
+                return v
+            else:
+                # Не номер и не @username
+                raise ValueError('Telegram контакт должен быть @username или номером телефона')
 
         elif contact_type in ['sms', 'call']:
-            # Валидация телефона
             phone_pattern = re.compile(r'^\+?[1-9]\d{10,14}$')
             cleaned = re.sub(r'[\s\-\(\)]', '', v)
             if not phone_pattern.match(cleaned):
