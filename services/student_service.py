@@ -28,6 +28,8 @@ class StudentService:
             consent_status: Optional[bool] = None,
             department_id: Optional[int] = None,
             speciality_id: Optional[int] = None,
+            study_form: Optional[str] = None,
+            study_basis: Optional[str] = None,
             search: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Получение списка абитуриентов, доступных пользователю"""
@@ -60,13 +62,39 @@ class StudentService:
                 pass
 
         if consent_status is not None:
-            query = query.filter(Student.consent_status == consent_status)
+            query = query.join(StudentApplication).filter(
+                StudentApplication.consent_status == consent_status
+            ).distinct()
 
         if department_id:
-            query = query.join(StudentApplication).filter(StudentApplication.department_id == department_id).distinct()
+            query = query.join(StudentApplication).filter(
+                StudentApplication.department_id == department_id
+            ).distinct()
 
         if speciality_id:
-            query = query.join(StudentApplication).filter(StudentApplication.speciality_id == speciality_id).distinct()
+            query = query.join(StudentApplication).filter(
+                StudentApplication.speciality_id == speciality_id
+            ).distinct()
+
+        # НОВЫЕ ФИЛЬТРЫ ПО ФОРМЕ ОБУЧЕНИЯ И ОСНОВЕ
+        if study_form:
+            query = query.join(StudentApplication).filter(
+                StudentApplication.study_form == study_form
+            ).distinct()
+
+        if study_basis:
+            query = query.join(StudentApplication).filter(
+                StudentApplication.study_basis == study_basis
+            ).distinct()
+
+        if application_status:
+            try:
+                status_enum = ApplicationStatus(application_status)
+                query = query.join(StudentApplication).filter(
+                    StudentApplication.application_status == status_enum
+                ).distinct()
+            except ValueError:
+                pass
 
         if search:
             query = query.filter(
@@ -116,6 +144,16 @@ class StudentService:
                 'consent_status': app.consent_status,
                 'participation': app.participation,
                 'is_main_contest': app.is_main_contest,
+                # НОВЫЕ ПОЛЯ
+                'study_form': app.study_form.value if app.study_form else None,
+                'study_basis': app.study_basis.value if app.study_basis else None,
+                'study_level': app.study_level.value if app.study_level else None,
+                'budget_places_total': app.budget_places_total,
+                'budget_places_filled': app.budget_places_filled,
+                'paid_places_total': app.paid_places_total,
+                'paid_places_filled': app.paid_places_filled,
+                'target_places_total': app.target_places_total,
+                'target_places_filled': app.target_places_filled,
             })
 
         return result
@@ -160,7 +198,11 @@ class StudentService:
                 total_score=student_data.get('total_score'),
                 application_status=ApplicationStatus(student_data['application_status']) if student_data.get(
                     'application_status') else ApplicationStatus.PENDING,
-                consent_status=student_data.get('consent_status', False)
+                consent_status=student_data.get('consent_status', False),
+                # НОВЫЕ ПОЛЯ ДЛЯ ЗАЯВЛЕНИЯ
+                study_form=StudyForm(student_data['study_form']) if student_data.get('study_form') else None,
+                study_basis=StudyBasis(student_data['study_basis']) if student_data.get('study_basis') else None,
+                study_level=StudyLevel(student_data['study_level']) if student_data.get('study_level') else None
             )
             db.add(application)
             db.commit()
@@ -182,51 +224,80 @@ class StudentService:
         if not self._can_access_student(student, user_id, db):
             raise PermissionError("Нет доступа к этому абитуриенту")
 
+        # Обновляем поля студента
         for field, value in update_data.items():
             if value is None:
                 continue
 
-            if hasattr(student, field):
-                if field == 'prior_contact' and isinstance(value, str):
-                    if value:
-                        try:
-                            setattr(student, field, PriorContact(value))
-                        except ValueError as e:
-                            print(f"⚠️ Ошибка: {e}")
-                    else:
-                        setattr(student, field, None)
-                elif field == 'status' and isinstance(value, str):
+            if field == 'study_form' and isinstance(value, str):
+                try:
+                    student.study_form = StudyForm(value)
+                except ValueError:
+                    pass
+            elif field == 'study_basis' and isinstance(value, str):
+                try:
+                    student.study_basis = StudyBasis(value)
+                except ValueError:
+                    pass
+            elif field == 'study_level' and isinstance(value, str):
+                try:
+                    student.study_level = StudyLevel(value)
+                except ValueError:
+                    pass
+            elif field == 'prior_contact' and isinstance(value, str):
+                if value:
                     try:
-                        setattr(student, field, StudentStatus(value))
-                    except ValueError:
-                        pass
-                elif field == 'contact_status' and isinstance(value, str):
-                    try:
-                        setattr(student, field, ContactStatus(value))
-                    except ValueError:
-                        pass
-                elif field == 'contact_type' and isinstance(value, str):
-                    try:
-                        setattr(student, field, ContactType(value))
-                    except ValueError:
-                        pass
-                elif field == 'study_level' and isinstance(value, str):
-                    try:
-                        setattr(student, field, StudyLevel(value))
-                    except ValueError:
-                        pass
-                elif field == 'study_form' and isinstance(value, str):
-                    try:
-                        setattr(student, field, StudyForm(value))
-                    except ValueError:
-                        pass
-                elif field == 'study_basis' and isinstance(value, str):
-                    try:
-                        setattr(student, field, StudyBasis(value))
+                        student.prior_contact = PriorContact(value)
                     except ValueError:
                         pass
                 else:
-                    setattr(student, field, value)
+                    student.prior_contact = None
+            elif field == 'status' and isinstance(value, str):
+                try:
+                    student.status = StudentStatus(value)
+                except ValueError:
+                    pass
+            elif field == 'contact_status' and isinstance(value, str):
+                try:
+                    student.contact_status = ContactStatus(value)
+                except ValueError:
+                    pass
+            elif field == 'contact_type' and isinstance(value, str):
+                try:
+                    student.contact_type = ContactType(value)
+                except ValueError:
+                    pass
+            elif hasattr(student, field):
+                setattr(student, field, value)
+
+        # Если нужно обновить основное заявление
+        if any(f in update_data for f in ['total_score', 'application_status', 'consent_status', 'position', 'study_form', 'study_basis']):
+            main_application = db.query(StudentApplication).filter(
+                StudentApplication.student_id == student_id
+            ).order_by(StudentApplication.priority.asc(), StudentApplication.id.asc()).first()
+
+            if main_application:
+                if 'total_score' in update_data and update_data['total_score'] is not None:
+                    main_application.total_score = update_data['total_score']
+                if 'application_status' in update_data and update_data['application_status'] is not None:
+                    try:
+                        main_application.application_status = ApplicationStatus(update_data['application_status'])
+                    except ValueError:
+                        pass
+                if 'consent_status' in update_data and update_data['consent_status'] is not None:
+                    main_application.consent_status = update_data['consent_status']
+                if 'position' in update_data and update_data['position'] is not None:
+                    main_application.position = update_data['position']
+                if 'study_form' in update_data and update_data['study_form'] is not None:
+                    try:
+                        main_application.study_form = StudyForm(update_data['study_form'])
+                    except ValueError:
+                        pass
+                if 'study_basis' in update_data and update_data['study_basis'] is not None:
+                    try:
+                        main_application.study_basis = StudyBasis(update_data['study_basis'])
+                    except ValueError:
+                        pass
 
         student.updated_at = datetime.utcnow()
         db.commit()
@@ -268,6 +339,130 @@ class StudentService:
 
         return False
 
+    def get_competitive_info_for_student(
+            self,
+            student_id: int,
+            db: Session,
+            speciality_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Получение конкурсной информации для студента"""
+        # Получаем основное заявление студента
+        query = db.query(StudentApplication).filter(
+            StudentApplication.student_id == student_id
+        )
+
+        if speciality_id:
+            query = query.filter(StudentApplication.speciality_id == speciality_id)
+
+        application = query.order_by(
+            StudentApplication.priority.asc(),
+            StudentApplication.id.asc()
+        ).first()
+
+        if not application:
+            return {
+                'position': None,
+                'total_students': 0,
+                'total_enrolled': 0,
+                'total_submitted': 0,
+                'average_score': 0,
+                'min_score': 0,
+                'max_score': 0,
+                'passing_score': None,
+                'student_score': None,
+                'department_name': None,
+                'speciality_name': None,
+                'profile_name': None,
+                'study_form': None,
+                'study_basis': None,
+                'budget_places_total': None,
+                'budget_places_filled': None,
+                'budget_places_free': None,
+                'competition': None
+            }
+
+        # Получаем всех студентов на этой же специальности
+        group_query = db.query(StudentApplication).filter(
+            StudentApplication.department_id == application.department_id,
+            StudentApplication.speciality_id == application.speciality_id
+        )
+
+        if application.profile_id:
+            group_query = group_query.filter(StudentApplication.profile_id == application.profile_id)
+
+        if application.study_form:
+            group_query = group_query.filter(StudentApplication.study_form == application.study_form)
+
+        if application.study_basis:
+            group_query = group_query.filter(StudentApplication.study_basis == application.study_basis)
+
+        all_applications = group_query.all()
+
+        # Сортируем по баллам
+        sorted_apps = sorted(all_applications, key=lambda x: x.total_score or 0, reverse=True)
+
+        # Находим место студента
+        position = 1
+        for i, app in enumerate(sorted_apps, 1):
+            if app.student_id == student_id:
+                position = i
+                break
+
+        # Статистика
+        total_students = len(all_applications)
+        enrolled_count = len([a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED])
+        submitted_count = len([a for a in all_applications if a.application_status != ApplicationStatus.PENDING])
+
+        scores = [a.total_score for a in all_applications if a.total_score and a.total_score > 0]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        min_score = min(scores) if scores else 0
+        max_score = max(scores) if scores else 0
+
+        # Проходной балл
+        passing_score = None
+        if enrolled_count > 0:
+            enrolled_apps = [a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED]
+            enrolled_sorted = sorted(enrolled_apps, key=lambda x: x.total_score or 0, reverse=True)
+            if enrolled_sorted:
+                passing_score = enrolled_sorted[-1].total_score
+
+        # Названия
+        department = db.query(Department).filter(Department.id == application.department_id).first()
+        speciality = db.query(Speciality).filter(Speciality.id == application.speciality_id).first()
+        profile = db.query(Profile).filter(Profile.id == application.profile_id).first() if application.profile_id else None
+
+        # Свободные места
+        budget_places_free = None
+        if application.budget_places_total:
+            filled = application.budget_places_filled or 0
+            budget_places_free = application.budget_places_total - filled
+
+        # Конкурс
+        competition = None
+        if application.budget_places_total and application.budget_places_total > 0:
+            competition = round(total_students / application.budget_places_total, 2)
+
+        return {
+            'position': position,
+            'total_students': total_students,
+            'total_enrolled': enrolled_count,
+            'total_submitted': submitted_count,
+            'average_score': round(avg_score, 2),
+            'min_score': min_score,
+            'max_score': max_score,
+            'passing_score': passing_score,
+            'student_score': application.total_score,
+            'department_name': department.name if department else None,
+            'speciality_name': speciality.name if speciality else None,
+            'profile_name': profile.name if profile else None,
+            'study_form': application.study_form.value if application.study_form else None,
+            'study_basis': application.study_basis.value if application.study_basis else None,
+            'budget_places_total': application.budget_places_total,
+            'budget_places_filled': application.budget_places_filled,
+            'budget_places_free': budget_places_free,
+            'competition': competition
+        }
+
     def _student_to_dict(self, student: Student, db: Session) -> Dict[str, Any]:
         """Конвертация абитуриента в словарь"""
         if not student:
@@ -286,6 +481,8 @@ class StudentService:
         application_status = None
         consent_status = None
         position = None
+        study_form = None
+        study_basis = None
 
         if main_application:
             department = db.query(Department).filter(Department.id == main_application.department_id).first()
@@ -295,6 +492,13 @@ class StudentService:
             application_status = main_application.application_status.value if main_application.application_status else None
             consent_status = main_application.consent_status
             position = main_application.position
+            # Берем форму обучения из заявления (приоритет), если нет - из студента
+            study_form = main_application.study_form.value if main_application.study_form else (
+                student.study_form.value if student.study_form else None
+            )
+            study_basis = main_application.study_basis.value if main_application.study_basis else (
+                student.study_basis.value if student.study_basis else None
+            )
 
         # Получаем последнюю коммуникацию
         last_comm = db.query(Communication).filter(
@@ -315,8 +519,8 @@ class StudentService:
             'profile_id': main_application.profile_id if main_application else None,
             'profile_name': profile.name if profile else None,
             'study_level': student.study_level.value if student.study_level else None,
-            'study_form': student.study_form.value if student.study_form else None,
-            'study_basis': student.study_basis.value if student.study_basis else None,
+            'study_form': study_form,
+            'study_basis': study_basis,
             'status': student.status.value if student.status else None,
             'application_status': application_status,
             'contact_status': student.contact_status.value if student.contact_status else None,

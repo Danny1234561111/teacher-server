@@ -10,7 +10,8 @@ from services.student_service import StudentService
 from services.communication_service import CommunicationService
 from services.auth_service import AuthService
 from database.database import get_db
-from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus
+from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus, StudyForm, \
+    StudyBasis, StudyLevel
 
 router = APIRouter(prefix="", tags=["Students"])
 security = HTTPBearer()
@@ -121,6 +122,9 @@ class StudentCreate(BaseModel):
     full_name: str = Field(..., min_length=2, description="ФИО абитуриента")
     russian_student_id: Optional[int] = Field(None, description="Российский ID студента (7 цифр)")
     phone: Optional[str] = Field(None, description="Номер телефона")
+    study_level: Optional[str] = Field(None, description="Уровень подготовки (Бакалавриат/Магистратура)")
+    study_form: Optional[str] = Field(None, description="Форма обучения (Очная/Заочная)")
+    study_basis: Optional[str] = Field(None, description="Основа обучения (Бюджетная/Платная/Целевая)")
 
     @field_validator('full_name')
     @classmethod
@@ -128,6 +132,33 @@ class StudentCreate(BaseModel):
         if not v or len(v.strip()) < 2:
             raise ValueError('ФИО должно содержать минимум 2 символа')
         return v.strip()
+
+    @field_validator('study_level')
+    @classmethod
+    def validate_study_level(cls, v):
+        if v:
+            valid_values = [level.value for level in StudyLevel]
+            if v not in valid_values:
+                raise ValueError(f"Недопустимый уровень. Допустимые: {', '.join(valid_values)}")
+        return v
+
+    @field_validator('study_form')
+    @classmethod
+    def validate_study_form(cls, v):
+        if v:
+            valid_values = [form.value for form in StudyForm]
+            if v not in valid_values:
+                raise ValueError(f"Недопустимая форма. Допустимые: {', '.join(valid_values)}")
+        return v
+
+    @field_validator('study_basis')
+    @classmethod
+    def validate_study_basis(cls, v):
+        if v:
+            valid_values = [basis.value for basis in StudyBasis]
+            if v not in valid_values:
+                raise ValueError(f"Недопустимая основа. Допустимые: {', '.join(valid_values)}")
+        return v
 
 
 class StudentUpdate(BaseModel):
@@ -158,6 +189,33 @@ class StudentUpdate(BaseModel):
                 raise ValueError(
                     f"Недопустимый статус контакта. Допустимые: {', '.join(ContactStatus.get_valid_values())}")
             return normalized
+        return v
+
+    @field_validator('study_level')
+    @classmethod
+    def validate_study_level(cls, v):
+        if v:
+            valid_values = [level.value for level in StudyLevel]
+            if v not in valid_values:
+                raise ValueError(f"Недопустимый уровень. Допустимые: {', '.join(valid_values)}")
+        return v
+
+    @field_validator('study_form')
+    @classmethod
+    def validate_study_form(cls, v):
+        if v:
+            valid_values = [form.value for form in StudyForm]
+            if v not in valid_values:
+                raise ValueError(f"Недопустимая форма. Допустимые: {', '.join(valid_values)}")
+        return v
+
+    @field_validator('study_basis')
+    @classmethod
+    def validate_study_basis(cls, v):
+        if v:
+            valid_values = [basis.value for basis in StudyBasis]
+            if v not in valid_values:
+                raise ValueError(f"Недопустимая основа. Допустимые: {', '.join(valid_values)}")
         return v
 
 
@@ -218,6 +276,16 @@ class StudentApplicationResponse(BaseModel):
     consent_status: Optional[bool] = None
     participation: Optional[bool] = None
     is_main_contest: Optional[bool] = None
+    # НОВЫЕ ПОЛЯ
+    study_form: Optional[str] = None
+    study_basis: Optional[str] = None
+    study_level: Optional[str] = None
+    budget_places_total: Optional[int] = None
+    budget_places_filled: Optional[int] = None
+    paid_places_total: Optional[int] = None
+    paid_places_filled: Optional[int] = None
+    target_places_total: Optional[int] = None
+    target_places_filled: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -239,6 +307,32 @@ class CompetitiveInfoResponse(BaseModel):
     department_name: Optional[str]
     speciality_name: Optional[str]
     profile_name: Optional[str]
+    # НОВЫЕ ПОЛЯ
+    study_form: Optional[str] = None
+    study_basis: Optional[str] = None
+    budget_places_total: Optional[int] = None
+    budget_places_filled: Optional[int] = None
+    budget_places_free: Optional[int] = None
+    competition: Optional[float] = None
+
+
+class GroupStatisticsResponse(BaseModel):
+    """Статистика по конкурсной группе"""
+    group_name: str
+    study_form: Optional[str]
+    study_basis: Optional[str]
+    total_applications: int
+    applications_submitted: int
+    enrolled: int
+    average_score: float
+    min_score: int
+    max_score: int
+    budget: dict
+    paid: dict
+    target: dict
+    competition: float
+    passing_score_current: int
+    passing_score_last_year: int
 
 
 # ===== МОДЕЛИ ДЛЯ КОММУНИКАЦИЙ =====
@@ -365,6 +459,8 @@ async def get_students(
         consent_status: Optional[bool] = None,
         department_id: Optional[int] = None,
         speciality_id: Optional[int] = None,
+        study_form: Optional[str] = Query(None, description="Форма обучения (Очная/Очно-заочная/Заочная)"),
+        study_basis: Optional[str] = Query(None, description="Основа обучения (Бюджетная/Платная/Целевая)"),
         search: Optional[str] = None,
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
@@ -381,6 +477,8 @@ async def get_students(
         consent_status=consent_status,
         department_id=department_id,
         speciality_id=speciality_id,
+        study_form=study_form,
+        study_basis=study_basis,
         search=search
     )
 
@@ -452,6 +550,16 @@ async def get_student_applications(
             "consent_status": app.consent_status if app.consent_status is not None else False,
             "participation": app.participation if app.participation is not None else True,
             "is_main_contest": app.is_main_contest if app.is_main_contest is not None else False,
+            # НОВЫЕ ПОЛЯ
+            "study_form": app.study_form.value if app.study_form else None,
+            "study_basis": app.study_basis.value if app.study_basis else None,
+            "study_level": app.study_level.value if app.study_level else None,
+            "budget_places_total": app.budget_places_total,
+            "budget_places_filled": app.budget_places_filled,
+            "paid_places_total": app.paid_places_total,
+            "paid_places_filled": app.paid_places_filled,
+            "target_places_total": app.target_places_total,
+            "target_places_filled": app.target_places_filled,
             "created_at": app.created_at,
             "updated_at": app.updated_at
         })
@@ -491,7 +599,13 @@ async def get_student_competitive_info(
             student_score=student.get('total_score'),
             department_name=None,
             speciality_name=None,
-            profile_name=None
+            profile_name=None,
+            study_form=None,
+            study_basis=None,
+            budget_places_total=None,
+            budget_places_filled=None,
+            budget_places_free=None,
+            competition=None
         )
 
     query = db.query(StudentApplication).filter(
@@ -501,6 +615,12 @@ async def get_student_competitive_info(
 
     if main_application.profile_id:
         query = query.filter(StudentApplication.profile_id == main_application.profile_id)
+
+    # Фильтруем по форме обучения и основе
+    if main_application.study_form:
+        query = query.filter(StudentApplication.study_form == main_application.study_form)
+    if main_application.study_basis:
+        query = query.filter(StudentApplication.study_basis == main_application.study_basis)
 
     all_applications = query.all()
 
@@ -533,6 +653,18 @@ async def get_student_competitive_info(
     profile = db.query(Profile).filter(
         Profile.id == main_application.profile_id).first() if main_application.profile_id else None
 
+    # Расчет свободных мест
+    budget_places_free = None
+    if main_application.budget_places_total and main_application.budget_places_filled:
+        budget_places_free = main_application.budget_places_total - main_application.budget_places_filled
+    elif main_application.budget_places_total:
+        budget_places_free = main_application.budget_places_total
+
+    # Конкурс
+    competition = None
+    if main_application.budget_places_total and main_application.budget_places_total > 0:
+        competition = round(total_students / main_application.budget_places_total, 2)
+
     return CompetitiveInfoResponse(
         position=position,
         total_students=total_students,
@@ -545,11 +677,15 @@ async def get_student_competitive_info(
         student_score=main_application.total_score,
         department_name=department.name if department else None,
         speciality_name=speciality.name if speciality else None,
-        profile_name=profile.name if profile else None
+        profile_name=profile.name if profile else None,
+        study_form=main_application.study_form.value if main_application.study_form else None,
+        study_basis=main_application.study_basis.value if main_application.study_basis else None,
+        budget_places_total=main_application.budget_places_total,
+        budget_places_filled=main_application.budget_places_filled,
+        budget_places_free=budget_places_free,
+        competition=competition
     )
 
-
-# ===== НОВЫЙ ЭНДПОИНТ ДЛЯ КОНКУРСНОЙ ИНФОРМАЦИИ ПО КОНКРЕТНОЙ СПЕЦИАЛЬНОСТИ =====
 
 @router.get("/{student_id}/competitive-info/{speciality_id}", response_model=CompetitiveInfoResponse)
 async def get_student_competitive_info_for_speciality(
@@ -588,7 +724,13 @@ async def get_student_competitive_info_for_speciality(
             student_score=None,
             department_name=None,
             speciality_name=None,
-            profile_name=None
+            profile_name=None,
+            study_form=None,
+            study_basis=None,
+            budget_places_total=None,
+            budget_places_filled=None,
+            budget_places_free=None,
+            competition=None
         )
 
     # Получаем всех студентов на той же специальности
@@ -598,6 +740,12 @@ async def get_student_competitive_info_for_speciality(
 
     if application.profile_id:
         query = query.filter(StudentApplication.profile_id == application.profile_id)
+
+    # Фильтруем по форме обучения и основе
+    if application.study_form:
+        query = query.filter(StudentApplication.study_form == application.study_form)
+    if application.study_basis:
+        query = query.filter(StudentApplication.study_basis == application.study_basis)
 
     all_applications = query.all()
 
@@ -634,6 +782,18 @@ async def get_student_competitive_info_for_speciality(
     speciality = db.query(Speciality).filter(Speciality.id == speciality_id).first()
     profile = db.query(Profile).filter(Profile.id == application.profile_id).first() if application.profile_id else None
 
+    # Расчет свободных мест
+    budget_places_free = None
+    if application.budget_places_total and application.budget_places_filled:
+        budget_places_free = application.budget_places_total - application.budget_places_filled
+    elif application.budget_places_total:
+        budget_places_free = application.budget_places_total
+
+    # Конкурс
+    competition = None
+    if application.budget_places_total and application.budget_places_total > 0:
+        competition = round(total_students / application.budget_places_total, 2)
+
     return CompetitiveInfoResponse(
         position=position,
         total_students=total_students,
@@ -646,8 +806,50 @@ async def get_student_competitive_info_for_speciality(
         student_score=application.total_score,
         department_name=department.name if department else None,
         speciality_name=speciality.name if speciality else None,
-        profile_name=profile.name if profile else None
+        profile_name=profile.name if profile else None,
+        study_form=application.study_form.value if application.study_form else None,
+        study_basis=application.study_basis.value if application.study_basis else None,
+        budget_places_total=application.budget_places_total,
+        budget_places_filled=application.budget_places_filled,
+        budget_places_free=budget_places_free,
+        competition=competition
     )
+
+
+# ===== НОВЫЙ ЭНДПОИНТ ДЛЯ СТАТИСТИКИ ПО ГРУППАМ =====
+
+@router.get("/statistics/groups", response_model=List[GroupStatisticsResponse])
+async def get_group_statistics(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    """Получение статистики по всем конкурсным группам"""
+    from services.parser_service import ParserService, GROUPS_CONFIG
+
+    parser_service = ParserService(db)
+    results = []
+
+    for group_config in GROUPS_CONFIG:
+        stats = parser_service.calculate_group_statistics(group_config)
+        results.append(GroupStatisticsResponse(
+            group_name=group_config['name'],
+            study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
+            study_basis=group_config.get('study_basis').value if group_config.get('study_basis') else None,
+            total_applications=stats['total_applications'],
+            applications_submitted=stats['applications_submitted'],
+            enrolled=stats['enrolled'],
+            average_score=stats['average_score'],
+            min_score=stats['min_score'],
+            max_score=stats['max_score'],
+            budget=stats['budget'],
+            paid=stats['paid'],
+            target=stats['target'],
+            competition=stats['competition'],
+            passing_score_current=stats['passing_score_current'],
+            passing_score_last_year=stats['passing_score_last_year']
+        ))
+
+    return results
 
 
 # ===== ЭНДПОИНТЫ ДЛЯ СОЗДАНИЯ/ОБНОВЛЕНИЯ/УДАЛЕНИЯ =====

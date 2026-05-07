@@ -42,8 +42,8 @@ GROUPS_CONFIG = [
         "study_form": StudyForm.FULL_TIME,
         "study_basis": StudyBasis.BUDGET,
         "budget_places": 25,  # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
-        "paid_places": 15,    # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
-        "target_places": 5,   # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
+        "paid_places": 15,  # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
+        "target_places": 5,  # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
         "passing_score_2024": 245,  # проходной балл прошлого года
         "faculty_name": "Факультет бизнес-коммуникаций и информатики"
     },
@@ -57,8 +57,8 @@ GROUPS_CONFIG = [
         "study_form": StudyForm.FULL_TIME,
         "study_basis": StudyBasis.BUDGET,
         "budget_places": 20,  # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
-        "paid_places": 10,    # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
-        "target_places": 3,   # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
+        "paid_places": 10,  # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
+        "target_places": 3,  # УТОЧНИТЬ У ПРИЕМНОЙ КОМИССИИ
         "passing_score_2024": 230,  # проходной балл прошлого года
         "faculty_name": "Факультет бизнес-коммуникаций и информатики"
     }
@@ -101,7 +101,8 @@ class ParserService:
 
         return department
 
-    def _get_or_create_speciality(self, speciality_name: str, department_id: int, code: str = None) -> Optional[Speciality]:
+    def _get_or_create_speciality(self, speciality_name: str, department_id: int, code: str = None) -> Optional[
+        Speciality]:
         """Получает или создает специальность"""
         speciality = self.db.query(Speciality).filter(
             Speciality.name == speciality_name,
@@ -135,8 +136,8 @@ class ParserService:
                 speciality_id=speciality_id,
                 code=profile_name[:10].upper().replace(" ", "_"),
                 study_level=None,  # Будет обновлено из конфига
-                study_form=None,    # Будет обновлено из конфига
-                study_basis=None,   # Будет обновлено из конфига
+                study_form=None,  # Будет обновлено из конфига
+                study_basis=None,  # Будет обновлено из конфига
                 budget_places=0,
                 paid_places=0,
                 target_places=0
@@ -250,7 +251,8 @@ class ParserService:
 
         return scores
 
-    def update_or_create_application(self, item: Dict, group_config: Dict, student: Student) -> tuple[Optional[StudentApplication], bool]:
+    def update_or_create_application(self, item: Dict, group_config: Dict, student: Student) -> tuple[
+        Optional[StudentApplication], bool]:
         """Обновляет или создает заявление студента на конкретную специальность"""
         try:
             # Получаем или создаем связанные записи
@@ -277,7 +279,7 @@ class ParserService:
                 StudentApplication.profile_id == profile.id,
                 StudentApplication.study_form == group_config.get('study_form'),
                 StudentApplication.study_basis == group_config.get('study_basis'),
-                ).first()
+            ).first()
 
             is_new = False
             if not application:
@@ -517,7 +519,7 @@ class ParserService:
                 StudentApplication.speciality_id == speciality.id,
                 StudentApplication.study_form == group_config.get('study_form'),
                 StudentApplication.study_basis == group_config.get('study_basis'),
-                )
+            )
 
             profile = self.db.query(Profile).filter(
                 Profile.name == group_config['profile_name'],
@@ -602,7 +604,8 @@ class ParserService:
             target_stats["free"] = max(0, target_stats["total"] - target_stats["filled"])
 
             # Конкурс (абитуриентов на место)
-            competition = round(total_applications / max(budget_stats["total"], 1), 2) if budget_stats["total"] > 0 else 0
+            competition = round(total_applications / max(budget_stats["total"], 1), 2) if budget_stats[
+                                                                                              "total"] > 0 else 0
 
             return {
                 "total_applications": total_applications,
@@ -634,7 +637,8 @@ class ParserService:
             "average_score": 0,
             "min_score": 0,
             "max_score": 0,
-            "budget": {"total": 0, "filled": 0, "free": 0, "applicants_in_range": 0, "applicants_with_consent": 0, "passing_score": 0},
+            "budget": {"total": 0, "filled": 0, "free": 0, "applicants_in_range": 0, "applicants_with_consent": 0,
+                       "passing_score": 0},
             "paid": {"total": 0, "filled": 0, "free": 0, "applicants_with_consent": 0},
             "target": {"total": 0, "filled": 0, "free": 0, "applicants_with_consent": 0},
             "competition": 0,
@@ -653,7 +657,8 @@ class ParserService:
 
         return query.distinct().all()
 
-    def get_applications_by_form_and_basis(self, study_form: StudyForm = None, study_basis: StudyBasis = None) -> List[StudentApplication]:
+    def get_applications_by_form_and_basis(self, study_form: StudyForm = None, study_basis: StudyBasis = None) -> List[
+        StudentApplication]:
         """Получает заявления по форме обучения и основе"""
         query = self.db.query(StudentApplication)
 
