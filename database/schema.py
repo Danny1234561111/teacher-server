@@ -147,6 +147,7 @@ class StudentApplication(Base):
     profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=True)
 
     # Конкурсная информация по этой специальности
+
     position = Column(Integer, nullable=True)
     priority = Column(Integer, nullable=True)
     is_main_contest = Column(Boolean, default=False)
@@ -161,6 +162,17 @@ class StudentApplication(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    study_form = Column(Enum(StudyForm), nullable=True)  # Очная/Заочная и т.д.
+    study_basis = Column(Enum(StudyBasis), nullable=True)  # Бюджет/Платная/Целевая
+    study_level = Column(Enum(StudyLevel), nullable=True)  # Бакалавриат/Магистратура
+
+    budget_places_total = Column(Integer, nullable=True)
+    budget_places_filled = Column(Integer, nullable=True)
+    paid_places_total = Column(Integer, nullable=True)
+    paid_places_filled = Column(Integer, nullable=True)
+    target_places_total = Column(Integer, nullable=True)
+    target_places_filled = Column(Integer, nullable=True)
 
     # Связи
     student = relationship("Student", back_populates="applications")

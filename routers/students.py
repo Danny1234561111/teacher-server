@@ -530,7 +530,8 @@ async def get_student_competitive_info(
 
     department = db.query(Department).filter(Department.id == main_application.department_id).first()
     speciality = db.query(Speciality).filter(Speciality.id == main_application.speciality_id).first()
-    profile = db.query(Profile).filter(Profile.id == main_application.profile_id).first() if main_application.profile_id else None
+    profile = db.query(Profile).filter(
+        Profile.id == main_application.profile_id).first() if main_application.profile_id else None
 
     return CompetitiveInfoResponse(
         position=position,
