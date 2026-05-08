@@ -80,30 +80,31 @@ class PriorContact(enum.Enum):
     URL = "ссылка"
 
 
+# ИСПРАВЛЕНО: значения в ВЕРХНЕМ РЕГИСТРЕ
 class MeetingStatus(enum.Enum):
     """Статус посещения встречи/сбора"""
-    NOT_MET = "not_met"
-    MET = "met"
+    NOT_MET = "NOT_MET"
+    MET = "MET"
 
 
 class CallStatus(enum.Enum):
     """Статус дозвона"""
-    NOT_REACHED = "not_reached"
-    REACHED = "reached"
+    NOT_REACHED = "NOT_REACHED"
+    REACHED = "REACHED"
 
 
 class DecisionStatus(enum.Enum):
     """Статус решения о поступлении"""
-    THINKING = "thinking"
-    DECIDED = "decided"
+    THINKING = "THINKING"
+    DECIDED = "DECIDED"
 
 
 class DocumentsStatus(enum.Enum):
     """Статус подачи документов"""
-    NOT_SUBMITTED = "not_submitted"
-    ORIGINAL_SUBMITTED = "original_submitted"
-    WAITING_ORIGINAL = "waiting_original"
-    ENROLLED = "enrolled"
+    NOT_SUBMITTED = "NOT_SUBMITTED"
+    ORIGINAL_SUBMITTED = "ORIGINAL_SUBMITTED"
+    WAITING_ORIGINAL = "WAITING_ORIGINAL"
+    ENROLLED = "ENROLLED"
 
 
 # Модель Department (Направления)
@@ -219,7 +220,7 @@ class Student(Base):
     contact_status = Column(Enum(ContactStatus), default=ContactStatus.NEW)
     contact_type = Column(Enum(ContactType), nullable=True)
 
-    # НОВЫЕ СТАТУСЫ из Figma
+    # НОВЫЕ СТАТУСЫ из Figma - значения в ВЕРХНЕМ РЕГИСТРЕ
     meeting_status = Column(Enum(MeetingStatus), default=MeetingStatus.NOT_MET)
     call_status = Column(Enum(CallStatus), default=CallStatus.NOT_REACHED)
     decision_status = Column(Enum(DecisionStatus), default=DecisionStatus.THINKING)
