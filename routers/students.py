@@ -1,4 +1,3 @@
-# routers/students.py
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
@@ -57,10 +56,10 @@ class ContactStatus(str):
         return mapping.get(value_upper, value_upper)
 
 
-# НОВЫЕ ENUM для валидации статусов из Figma
+# НОВЫЕ ENUM для валидации статусов из Figma (UPPER CASE)
 class MeetingStatusEnum(str):
-    NOT_MET = "not_met"
-    MET = "met"
+    NOT_MET = "NOT_MET"
+    MET = "MET"
 
     @classmethod
     def get_valid_values(cls):
@@ -68,15 +67,17 @@ class MeetingStatusEnum(str):
 
     @classmethod
     def normalize(cls, value: str) -> str:
-        value_lower = value.lower()
-        if value_lower in cls.get_valid_values():
-            return value_lower
+        if not value:
+            return cls.NOT_MET
+        value_upper = value.upper()
+        if value_upper in cls.get_valid_values():
+            return value_upper
         return cls.NOT_MET
 
 
 class CallStatusEnum(str):
-    NOT_REACHED = "not_reached"
-    REACHED = "reached"
+    NOT_REACHED = "NOT_REACHED"
+    REACHED = "REACHED"
 
     @classmethod
     def get_valid_values(cls):
@@ -84,15 +85,17 @@ class CallStatusEnum(str):
 
     @classmethod
     def normalize(cls, value: str) -> str:
-        value_lower = value.lower()
-        if value_lower in cls.get_valid_values():
-            return value_lower
+        if not value:
+            return cls.NOT_REACHED
+        value_upper = value.upper()
+        if value_upper in cls.get_valid_values():
+            return value_upper
         return cls.NOT_REACHED
 
 
 class DecisionStatusEnum(str):
-    THINKING = "thinking"
-    DECIDED = "decided"
+    THINKING = "THINKING"
+    DECIDED = "DECIDED"
 
     @classmethod
     def get_valid_values(cls):
@@ -100,17 +103,19 @@ class DecisionStatusEnum(str):
 
     @classmethod
     def normalize(cls, value: str) -> str:
-        value_lower = value.lower()
-        if value_lower in cls.get_valid_values():
-            return value_lower
+        if not value:
+            return cls.THINKING
+        value_upper = value.upper()
+        if value_upper in cls.get_valid_values():
+            return value_upper
         return cls.THINKING
 
 
 class DocumentsStatusEnum(str):
-    NOT_SUBMITTED = "not_submitted"
-    ORIGINAL_SUBMITTED = "original_submitted"
-    WAITING_ORIGINAL = "waiting_original"
-    ENROLLED = "enrolled"
+    NOT_SUBMITTED = "NOT_SUBMITTED"
+    ORIGINAL_SUBMITTED = "ORIGINAL_SUBMITTED"
+    WAITING_ORIGINAL = "WAITING_ORIGINAL"
+    ENROLLED = "ENROLLED"
 
     @classmethod
     def get_valid_values(cls):
@@ -118,9 +123,11 @@ class DocumentsStatusEnum(str):
 
     @classmethod
     def normalize(cls, value: str) -> str:
-        value_lower = value.lower()
-        if value_lower in cls.get_valid_values():
-            return value_lower
+        if not value:
+            return cls.NOT_SUBMITTED
+        value_upper = value.upper()
+        if value_upper in cls.get_valid_values():
+            return value_upper
         return cls.NOT_SUBMITTED
 
 
@@ -247,7 +254,7 @@ class StudentUpdate(BaseModel):
     consent_status: Optional[bool] = None
     total_score: Optional[int] = None
 
-    # НОВЫЕ ПОЛЯ для статусов из Figma
+    # НОВЫЕ ПОЛЯ для статусов из Figma (UPPER CASE)
     meeting_status: Optional[str] = None
     call_status: Optional[str] = None
     decision_status: Optional[str] = None
@@ -270,7 +277,8 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = MeetingStatusEnum.normalize(v)
             if normalized not in MeetingStatusEnum.get_valid_values():
-                raise ValueError(f"Недопустимый статус встречи. Допустимые: {', '.join(MeetingStatusEnum.get_valid_values())}")
+                raise ValueError(
+                    f"Недопустимый статус встречи. Допустимые: {', '.join(MeetingStatusEnum.get_valid_values())}")
             return normalized
         return v
 
@@ -280,7 +288,8 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = CallStatusEnum.normalize(v)
             if normalized not in CallStatusEnum.get_valid_values():
-                raise ValueError(f"Недопустимый статус дозвона. Допустимые: {', '.join(CallStatusEnum.get_valid_values())}")
+                raise ValueError(
+                    f"Недопустимый статус дозвона. Допустимые: {', '.join(CallStatusEnum.get_valid_values())}")
             return normalized
         return v
 
@@ -290,7 +299,8 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = DecisionStatusEnum.normalize(v)
             if normalized not in DecisionStatusEnum.get_valid_values():
-                raise ValueError(f"Недопустимый статус решения. Допустимые: {', '.join(DecisionStatusEnum.get_valid_values())}")
+                raise ValueError(
+                    f"Недопустимый статус решения. Допустимые: {', '.join(DecisionStatusEnum.get_valid_values())}")
             return normalized
         return v
 
@@ -300,7 +310,8 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = DocumentsStatusEnum.normalize(v)
             if normalized not in DocumentsStatusEnum.get_valid_values():
-                raise ValueError(f"Недопустимый статус документов. Допустимые: {', '.join(DocumentsStatusEnum.get_valid_values())}")
+                raise ValueError(
+                    f"Недопустимый статус документов. Допустимые: {', '.join(DocumentsStatusEnum.get_valid_values())}")
             return normalized
         return v
 
@@ -361,11 +372,11 @@ class StudentResponse(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
-    # НОВЫЕ ПОЛЯ
-    meeting_status: Optional[str] = "not_met"
-    call_status: Optional[str] = "not_reached"
-    decision_status: Optional[str] = "thinking"
-    documents_status: Optional[str] = "not_submitted"
+    # НОВЫЕ ПОЛЯ (UPPER CASE)
+    meeting_status: Optional[str] = "NOT_MET"
+    call_status: Optional[str] = "NOT_REACHED"
+    decision_status: Optional[str] = "THINKING"
+    documents_status: Optional[str] = "NOT_SUBMITTED"
 
     class Config:
         from_attributes = True
@@ -579,10 +590,9 @@ async def get_students(
         study_form: Optional[str] = Query(None, description="Форма обучения (Очная/Очно-заочная/Заочная)"),
         study_basis: Optional[str] = Query(None, description="Основа обучения (Бюджетная/Платная/Целевая)"),
         search: Optional[str] = None,
-        # НОВЫЕ ПАРАМЕТРЫ ФИЛЬТРАЦИИ
-        meeting_status: Optional[str] = Query(None, description="Статус встречи (met/not_met)"),
-        call_status: Optional[str] = Query(None, description="Статус дозвона (reached/not_reached)"),
-        decision_status: Optional[str] = Query(None, description="Статус решения (decided/thinking)"),
+        meeting_status: Optional[str] = Query(None, description="Статус встречи (MET/NOT_MET)"),
+        call_status: Optional[str] = Query(None, description="Статус дозвона (REACHED/NOT_REACHED)"),
+        decision_status: Optional[str] = Query(None, description="Статус решения (DECIDED/THINKING)"),
         documents_status: Optional[str] = Query(None, description="Статус документов"),
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
@@ -1003,6 +1013,8 @@ async def update_student(
         return student
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{student_id}")

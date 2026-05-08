@@ -1,4 +1,3 @@
-# services/student_service.py
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
@@ -31,7 +30,6 @@ class StudentService:
             study_form: Optional[str] = None,
             study_basis: Optional[str] = None,
             search: Optional[str] = None,
-            # НОВЫЕ ПАРАМЕТРЫ ФИЛЬТРАЦИИ
             meeting_status: Optional[str] = None,
             call_status: Optional[str] = None,
             decision_status: Optional[str] = None,
@@ -40,7 +38,6 @@ class StudentService:
         """Получение списка абитуриентов, доступных пользователю"""
         query = db.query(Student)
 
-        # Фильтр по куратору или доступным направлениям
         user = db.query(User).filter(User.id == user_id).first()
         if user.role == 'admin':
             pass
@@ -52,7 +49,6 @@ class StudentService:
             else:
                 query = query.filter(Student.kurator_id == user_id)
 
-        # Фильтры по статусам
         if status:
             try:
                 query = query.filter(Student.status == StudentStatus(status))
@@ -65,7 +61,6 @@ class StudentService:
             except ValueError:
                 pass
 
-        # НОВЫЕ ФИЛЬТРЫ
         if meeting_status:
             try:
                 query = query.filter(Student.meeting_status == MeetingStatus(meeting_status))
@@ -206,7 +201,6 @@ class StudentService:
             status=StudentStatus.ACTIVE,
             contact_status=ContactStatus.NEW,
             contact_type=ContactType(student_data['contact_type']) if student_data.get('contact_type') else None,
-            # НОВЫЕ СТАТУСЫ ПО УМОЛЧАНИЮ
             meeting_status=MeetingStatus.NOT_MET,
             call_status=CallStatus.NOT_REACHED,
             decision_status=DecisionStatus.THINKING,
@@ -220,7 +214,6 @@ class StudentService:
         db.commit()
         db.refresh(new_student)
 
-        # Если есть данные о специальности - создаем заявление
         if student_data.get('department_id') and student_data.get('speciality_id'):
             application = StudentApplication(
                 student_id=new_student.id,
@@ -255,7 +248,6 @@ class StudentService:
         if not self._can_access_student(student, user_id, db):
             raise PermissionError("Нет доступа к этому абитуриенту")
 
-        # Обновляем поля студента
         for field, value in update_data.items():
             if value is None:
                 continue
@@ -298,7 +290,6 @@ class StudentService:
                     student.contact_type = ContactType(value)
                 except ValueError:
                     pass
-            # НОВЫЕ ПОЛЯ ДЛЯ ОБНОВЛЕНИЯ
             elif field == 'meeting_status' and isinstance(value, str):
                 try:
                     student.meeting_status = MeetingStatus(value)
@@ -322,7 +313,6 @@ class StudentService:
             elif hasattr(student, field):
                 setattr(student, field, value)
 
-        # Если нужно обновить основное заявление
         if any(f in update_data for f in
                ['total_score', 'application_status', 'consent_status', 'position', 'study_form', 'study_basis']):
             main_application = db.query(StudentApplication).filter(
@@ -573,9 +563,8 @@ class StudentService:
             'kurator_id': student.kurator_id,
             'created_at': student.created_at,
             'updated_at': student.updated_at,
-            # НОВЫЕ ПОЛЯ
-            'meeting_status': student.meeting_status.value if student.meeting_status else "not_met",
-            'call_status': student.call_status.value if student.call_status else "not_reached",
-            'decision_status': student.decision_status.value if student.decision_status else "thinking",
-            'documents_status': student.documents_status.value if student.documents_status else "not_submitted"
+            'meeting_status': student.meeting_status.value if student.meeting_status else "NOT_MET",
+            'call_status': student.call_status.value if student.call_status else "NOT_REACHED",
+            'decision_status': student.decision_status.value if student.decision_status else "THINKING",
+            'documents_status': student.documents_status.value if student.documents_status else "NOT_SUBMITTED"
         }
