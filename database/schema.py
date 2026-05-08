@@ -1,11 +1,9 @@
-# database/schema.py
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, JSON, Enum, Float
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 import enum
 
 Base = declarative_base()
-
 
 # Enums для статусов
 class StudentStatus(enum.Enum):
@@ -82,6 +80,32 @@ class PriorContact(enum.Enum):
     URL = "ссылка"
 
 
+class MeetingStatus(enum.Enum):
+    """Статус посещения встречи/сбора"""
+    NOT_MET = "not_met"
+    MET = "met"
+
+
+class CallStatus(enum.Enum):
+    """Статус дозвона"""
+    NOT_REACHED = "not_reached"
+    REACHED = "reached"
+
+
+class DecisionStatus(enum.Enum):
+    """Статус решения о поступлении"""
+    THINKING = "thinking"
+    DECIDED = "decided"
+
+
+class DocumentsStatus(enum.Enum):
+    """Статус подачи документов"""
+    NOT_SUBMITTED = "not_submitted"
+    ORIGINAL_SUBMITTED = "original_submitted"
+    WAITING_ORIGINAL = "waiting_original"
+    ENROLLED = "enrolled"
+
+
 # Модель Department (Направления)
 class Department(Base):
     __tablename__ = "departments"
@@ -137,7 +161,6 @@ class Profile(Base):
 
 # Модель StudentApplication (Заявление абитуриента на специальность)
 class StudentApplication(Base):
-    """Заявление абитуриента на конкретную конкурсную группу (многие ко многим)"""
     __tablename__ = "student_applications"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -145,8 +168,6 @@ class StudentApplication(Base):
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
     speciality_id = Column(Integer, ForeignKey("specialities.id"), nullable=False)
     profile_id = Column(Integer, ForeignKey("profiles.id"), nullable=True)
-
-    # Конкурсная информация по этой специальности
 
     position = Column(Integer, nullable=True)
     priority = Column(Integer, nullable=True)
@@ -156,16 +177,15 @@ class StudentApplication(Base):
     application_status = Column(Enum(ApplicationStatus), default=ApplicationStatus.PENDING)
     total_score = Column(Integer, nullable=True)
 
-    # Данные из API
     main_contest_other = Column(String, nullable=True)
     higher_priority_other = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    study_form = Column(Enum(StudyForm), nullable=True)  # Очная/Заочная и т.д.
-    study_basis = Column(Enum(StudyBasis), nullable=True)  # Бюджет/Платная/Целевая
-    study_level = Column(Enum(StudyLevel), nullable=True)  # Бакалавриат/Магистратура
+    study_form = Column(Enum(StudyForm), nullable=True)
+    study_basis = Column(Enum(StudyBasis), nullable=True)
+    study_level = Column(Enum(StudyLevel), nullable=True)
 
     budget_places_total = Column(Integer, nullable=True)
     budget_places_filled = Column(Integer, nullable=True)
@@ -174,14 +194,13 @@ class StudentApplication(Base):
     target_places_total = Column(Integer, nullable=True)
     target_places_filled = Column(Integer, nullable=True)
 
-    # Связи
     student = relationship("Student", back_populates="applications")
     department = relationship("Department", back_populates="applications")
     speciality = relationship("Speciality", back_populates="applications")
     profile = relationship("Profile", back_populates="applications")
 
 
-# Модель Student (Абитуриент) - ИСПРАВЛЕНА (удалены дублирующиеся поля)
+# Модель Student (Абитуриент)
 class Student(Base):
     __tablename__ = "students"
 
@@ -192,15 +211,19 @@ class Student(Base):
     additional_contacts = Column(JSON, nullable=True)
     prior_contact = Column(Enum(PriorContact), nullable=True)
 
-    # Общая информация (не зависит от специальности)
     study_level = Column(Enum(StudyLevel), nullable=True)
     study_form = Column(Enum(StudyForm), nullable=True)
     study_basis = Column(Enum(StudyBasis), nullable=True)
 
-    # Общие статусы (относятся к студенту в целом)
     status = Column(Enum(StudentStatus), default=StudentStatus.ACTIVE)
     contact_status = Column(Enum(ContactStatus), default=ContactStatus.NEW)
     contact_type = Column(Enum(ContactType), nullable=True)
+
+    # НОВЫЕ СТАТУСЫ из Figma
+    meeting_status = Column(Enum(MeetingStatus), default=MeetingStatus.NOT_MET)
+    call_status = Column(Enum(CallStatus), default=CallStatus.NOT_REACHED)
+    decision_status = Column(Enum(DecisionStatus), default=DecisionStatus.THINKING)
+    documents_status = Column(Enum(DocumentsStatus), default=DocumentsStatus.NOT_SUBMITTED)
 
     last_communication_date = Column(DateTime, nullable=True)
     imported_at = Column(DateTime, nullable=True)
@@ -208,7 +231,6 @@ class Student(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     kurator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    # Связи
     applications = relationship("StudentApplication", back_populates="student", cascade="all, delete-orphan")
     communications = relationship("Communication", back_populates="student", cascade="all, delete-orphan")
     kurator = relationship("User", foreign_keys=[kurator_id], back_populates="kurator_students")
@@ -230,7 +252,6 @@ class User(Base):
     assigned_specialities = Column(JSON, default=list)
     assigned_profiles = Column(JSON, default=list)
 
-    # Поля для активного контакта
     active_contact = Column(String(500), nullable=True)
     active_contact_type = Column(String(50), nullable=True)
     active_contact_updated_at = Column(DateTime, nullable=True)

@@ -11,7 +11,7 @@ from services.communication_service import CommunicationService
 from services.auth_service import AuthService
 from database.database import get_db
 from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus, StudyForm, \
-    StudyBasis, StudyLevel
+    StudyBasis, StudyLevel, MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus
 
 router = APIRouter(prefix="", tags=["Students"])
 security = HTTPBearer()
@@ -55,6 +55,73 @@ class ContactStatus(str):
             'NOT_INTERESTED': cls.NOT_INTERESTED,
         }
         return mapping.get(value_upper, value_upper)
+
+
+# НОВЫЕ ENUM для валидации статусов из Figma
+class MeetingStatusEnum(str):
+    NOT_MET = "not_met"
+    MET = "met"
+
+    @classmethod
+    def get_valid_values(cls):
+        return [cls.NOT_MET, cls.MET]
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        value_lower = value.lower()
+        if value_lower in cls.get_valid_values():
+            return value_lower
+        return cls.NOT_MET
+
+
+class CallStatusEnum(str):
+    NOT_REACHED = "not_reached"
+    REACHED = "reached"
+
+    @classmethod
+    def get_valid_values(cls):
+        return [cls.NOT_REACHED, cls.REACHED]
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        value_lower = value.lower()
+        if value_lower in cls.get_valid_values():
+            return value_lower
+        return cls.NOT_REACHED
+
+
+class DecisionStatusEnum(str):
+    THINKING = "thinking"
+    DECIDED = "decided"
+
+    @classmethod
+    def get_valid_values(cls):
+        return [cls.THINKING, cls.DECIDED]
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        value_lower = value.lower()
+        if value_lower in cls.get_valid_values():
+            return value_lower
+        return cls.THINKING
+
+
+class DocumentsStatusEnum(str):
+    NOT_SUBMITTED = "not_submitted"
+    ORIGINAL_SUBMITTED = "original_submitted"
+    WAITING_ORIGINAL = "waiting_original"
+    ENROLLED = "enrolled"
+
+    @classmethod
+    def get_valid_values(cls):
+        return [cls.NOT_SUBMITTED, cls.ORIGINAL_SUBMITTED, cls.WAITING_ORIGINAL, cls.ENROLLED]
+
+    @classmethod
+    def normalize(cls, value: str) -> str:
+        value_lower = value.lower()
+        if value_lower in cls.get_valid_values():
+            return value_lower
+        return cls.NOT_SUBMITTED
 
 
 class CommunicationType(str):
@@ -180,6 +247,12 @@ class StudentUpdate(BaseModel):
     consent_status: Optional[bool] = None
     total_score: Optional[int] = None
 
+    # НОВЫЕ ПОЛЯ для статусов из Figma
+    meeting_status: Optional[str] = None
+    call_status: Optional[str] = None
+    decision_status: Optional[str] = None
+    documents_status: Optional[str] = None
+
     @field_validator('contact_status')
     @classmethod
     def validate_contact_status(cls, v):
@@ -188,6 +261,46 @@ class StudentUpdate(BaseModel):
             if normalized not in ContactStatus.get_valid_values():
                 raise ValueError(
                     f"Недопустимый статус контакта. Допустимые: {', '.join(ContactStatus.get_valid_values())}")
+            return normalized
+        return v
+
+    @field_validator('meeting_status')
+    @classmethod
+    def validate_meeting_status(cls, v):
+        if v:
+            normalized = MeetingStatusEnum.normalize(v)
+            if normalized not in MeetingStatusEnum.get_valid_values():
+                raise ValueError(f"Недопустимый статус встречи. Допустимые: {', '.join(MeetingStatusEnum.get_valid_values())}")
+            return normalized
+        return v
+
+    @field_validator('call_status')
+    @classmethod
+    def validate_call_status(cls, v):
+        if v:
+            normalized = CallStatusEnum.normalize(v)
+            if normalized not in CallStatusEnum.get_valid_values():
+                raise ValueError(f"Недопустимый статус дозвона. Допустимые: {', '.join(CallStatusEnum.get_valid_values())}")
+            return normalized
+        return v
+
+    @field_validator('decision_status')
+    @classmethod
+    def validate_decision_status(cls, v):
+        if v:
+            normalized = DecisionStatusEnum.normalize(v)
+            if normalized not in DecisionStatusEnum.get_valid_values():
+                raise ValueError(f"Недопустимый статус решения. Допустимые: {', '.join(DecisionStatusEnum.get_valid_values())}")
+            return normalized
+        return v
+
+    @field_validator('documents_status')
+    @classmethod
+    def validate_documents_status(cls, v):
+        if v:
+            normalized = DocumentsStatusEnum.normalize(v)
+            if normalized not in DocumentsStatusEnum.get_valid_values():
+                raise ValueError(f"Недопустимый статус документов. Допустимые: {', '.join(DocumentsStatusEnum.get_valid_values())}")
             return normalized
         return v
 
@@ -248,6 +361,12 @@ class StudentResponse(BaseModel):
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
 
+    # НОВЫЕ ПОЛЯ
+    meeting_status: Optional[str] = "not_met"
+    call_status: Optional[str] = "not_reached"
+    decision_status: Optional[str] = "thinking"
+    documents_status: Optional[str] = "not_submitted"
+
     class Config:
         from_attributes = True
 
@@ -276,7 +395,6 @@ class StudentApplicationResponse(BaseModel):
     consent_status: Optional[bool] = None
     participation: Optional[bool] = None
     is_main_contest: Optional[bool] = None
-    # НОВЫЕ ПОЛЯ
     study_form: Optional[str] = None
     study_basis: Optional[str] = None
     study_level: Optional[str] = None
@@ -307,7 +425,6 @@ class CompetitiveInfoResponse(BaseModel):
     department_name: Optional[str]
     speciality_name: Optional[str]
     profile_name: Optional[str]
-    # НОВЫЕ ПОЛЯ
     study_form: Optional[str] = None
     study_basis: Optional[str] = None
     budget_places_total: Optional[int] = None
@@ -462,6 +579,11 @@ async def get_students(
         study_form: Optional[str] = Query(None, description="Форма обучения (Очная/Очно-заочная/Заочная)"),
         study_basis: Optional[str] = Query(None, description="Основа обучения (Бюджетная/Платная/Целевая)"),
         search: Optional[str] = None,
+        # НОВЫЕ ПАРАМЕТРЫ ФИЛЬТРАЦИИ
+        meeting_status: Optional[str] = Query(None, description="Статус встречи (met/not_met)"),
+        call_status: Optional[str] = Query(None, description="Статус дозвона (reached/not_reached)"),
+        decision_status: Optional[str] = Query(None, description="Статус решения (decided/thinking)"),
+        documents_status: Optional[str] = Query(None, description="Статус документов"),
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
@@ -479,7 +601,11 @@ async def get_students(
         speciality_id=speciality_id,
         study_form=study_form,
         study_basis=study_basis,
-        search=search
+        search=search,
+        meeting_status=meeting_status,
+        call_status=call_status,
+        decision_status=decision_status,
+        documents_status=documents_status
     )
 
     return {
@@ -550,7 +676,6 @@ async def get_student_applications(
             "consent_status": app.consent_status if app.consent_status is not None else False,
             "participation": app.participation if app.participation is not None else True,
             "is_main_contest": app.is_main_contest if app.is_main_contest is not None else False,
-            # НОВЫЕ ПОЛЯ
             "study_form": app.study_form.value if app.study_form else None,
             "study_basis": app.study_basis.value if app.study_basis else None,
             "study_level": app.study_level.value if app.study_level else None,
@@ -616,7 +741,6 @@ async def get_student_competitive_info(
     if main_application.profile_id:
         query = query.filter(StudentApplication.profile_id == main_application.profile_id)
 
-    # Фильтруем по форме обучения и основе
     if main_application.study_form:
         query = query.filter(StudentApplication.study_form == main_application.study_form)
     if main_application.study_basis:
@@ -653,14 +777,12 @@ async def get_student_competitive_info(
     profile = db.query(Profile).filter(
         Profile.id == main_application.profile_id).first() if main_application.profile_id else None
 
-    # Расчет свободных мест
     budget_places_free = None
     if main_application.budget_places_total and main_application.budget_places_filled:
         budget_places_free = main_application.budget_places_total - main_application.budget_places_filled
     elif main_application.budget_places_total:
         budget_places_free = main_application.budget_places_total
 
-    # Конкурс
     competition = None
     if main_application.budget_places_total and main_application.budget_places_total > 0:
         competition = round(total_students / main_application.budget_places_total, 2)
@@ -695,8 +817,6 @@ async def get_student_competitive_info_for_speciality(
         db: Session = Depends(get_db)
 ):
     """Получение конкурсной информации по студенту для конкретной специальности"""
-
-    # Проверяем доступ к студенту
     student = student_service.get_student_by_id(
         student_id=student_id,
         user_id=current_user.id,
@@ -705,7 +825,6 @@ async def get_student_competitive_info_for_speciality(
     if not student:
         raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
 
-    # Получаем заявление для указанной специальности
     application = db.query(StudentApplication).filter(
         StudentApplication.student_id == student_id,
         StudentApplication.speciality_id == speciality_id
@@ -733,7 +852,6 @@ async def get_student_competitive_info_for_speciality(
             competition=None
         )
 
-    # Получаем всех студентов на той же специальности
     query = db.query(StudentApplication).filter(
         StudentApplication.speciality_id == speciality_id
     )
@@ -741,7 +859,6 @@ async def get_student_competitive_info_for_speciality(
     if application.profile_id:
         query = query.filter(StudentApplication.profile_id == application.profile_id)
 
-    # Фильтруем по форме обучения и основе
     if application.study_form:
         query = query.filter(StudentApplication.study_form == application.study_form)
     if application.study_basis:
@@ -749,17 +866,14 @@ async def get_student_competitive_info_for_speciality(
 
     all_applications = query.all()
 
-    # Сортируем по баллам
     sorted_apps = sorted(all_applications, key=lambda x: x.total_score or 0, reverse=True)
 
-    # Находим место текущего студента
     position = 1
     for i, app in enumerate(sorted_apps, 1):
         if app.student_id == student_id:
             position = i
             break
 
-    # Подсчет статистики
     total_students = len(all_applications)
     enrolled_count = len([a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED])
     submitted_count = len([a for a in all_applications if a.application_status != ApplicationStatus.PENDING])
@@ -769,7 +883,6 @@ async def get_student_competitive_info_for_speciality(
     min_score = min(scores) if scores else 0
     max_score = max(scores) if scores else 0
 
-    # Проходной балл (последний зачисленный)
     passing_score = None
     if enrolled_count > 0:
         enrolled_apps = [a for a in all_applications if a.application_status == ApplicationStatus.ACCEPTED]
@@ -777,19 +890,16 @@ async def get_student_competitive_info_for_speciality(
         if enrolled_sorted:
             passing_score = enrolled_sorted[-1].total_score
 
-    # Получаем названия
     department = db.query(Department).filter(Department.id == application.department_id).first()
     speciality = db.query(Speciality).filter(Speciality.id == speciality_id).first()
     profile = db.query(Profile).filter(Profile.id == application.profile_id).first() if application.profile_id else None
 
-    # Расчет свободных мест
     budget_places_free = None
     if application.budget_places_total and application.budget_places_filled:
         budget_places_free = application.budget_places_total - application.budget_places_filled
     elif application.budget_places_total:
         budget_places_free = application.budget_places_total
 
-    # Конкурс
     competition = None
     if application.budget_places_total and application.budget_places_total > 0:
         competition = round(total_students / application.budget_places_total, 2)
@@ -816,7 +926,7 @@ async def get_student_competitive_info_for_speciality(
     )
 
 
-# ===== НОВЫЙ ЭНДПОИНТ ДЛЯ СТАТИСТИКИ ПО ГРУППАМ =====
+# ===== ЭНДПОИНТ ДЛЯ СТАТИСТИКИ ПО ГРУППАМ =====
 
 @router.get("/statistics/groups", response_model=List[GroupStatisticsResponse])
 async def get_group_statistics(

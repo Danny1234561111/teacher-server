@@ -135,50 +135,129 @@ def init_db():
 
 
 def ensure_schema_up_to_date():
-    """Проверяет и добавляет отсутствующие колонки в таблицу users"""
+    """Проверяет и добавляет отсутствующие колонки в таблицы users и students"""
     print("🔄 Проверка схемы базы данных...")
 
     try:
         inspector = inspect(engine)
 
-        if 'users' not in inspector.get_table_names():
-            print("⚠️ Таблица users не найдена")
-            return
+        # ========== ОБНОВЛЕНИЕ ТАБЛИЦЫ users ==========
+        if 'users' in inspector.get_table_names():
+            existing_columns = [col['name'] for col in inspector.get_columns('users')]
 
-        existing_columns = [col['name'] for col in inspector.get_columns('users')]
+            if 'active_contact' not in existing_columns:
+                print("➕ Добавление поля active_contact в users...")
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN active_contact VARCHAR(500) NULL"))
+                    conn.commit()
+                print("✅ Поле active_contact добавлено")
+            else:
+                print("✅ Поле active_contact уже существует")
 
-        # Добавляем active_contact если нет
-        if 'active_contact' not in existing_columns:
-            print("➕ Добавление поля active_contact...")
+            if 'active_contact_type' not in existing_columns:
+                print("➕ Добавление поля active_contact_type в users...")
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN active_contact_type VARCHAR(50) NULL"))
+                    conn.commit()
+                print("✅ Поле active_contact_type добавлено")
+            else:
+                print("✅ Поле active_contact_type уже существует")
+
+            if 'active_contact_updated_at' not in existing_columns:
+                print("➕ Добавление поля active_contact_updated_at в users...")
+                with engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE users ADD COLUMN active_contact_updated_at TIMESTAMP NULL"))
+                    conn.commit()
+                print("✅ Поле active_contact_updated_at добавлено")
+            else:
+                print("✅ Поле active_contact_updated_at уже существует")
+
+        # ========== ОБНОВЛЕНИЕ ТАБЛИЦЫ students ==========
+        if 'students' in inspector.get_table_names():
+            existing_columns = [col['name'] for col in inspector.get_columns('students')]
+
+            # Добавляем поле meeting_status (был на сборе/не был)
+            if 'meeting_status' not in existing_columns:
+                print("➕ Добавление поля meeting_status в students...")
+                with engine.connect() as conn:
+                    conn.execute(text("""
+                        ALTER TABLE students 
+                        ADD COLUMN meeting_status VARCHAR(50) DEFAULT 'not_met'
+                    """))
+                    conn.commit()
+                print("✅ Поле meeting_status добавлено")
+            else:
+                print("✅ Поле meeting_status уже существует")
+
+            # Добавляем поле call_status (дозвонились/нет)
+            if 'call_status' not in existing_columns:
+                print("➕ Добавление поля call_status в students...")
+                with engine.connect() as conn:
+                    conn.execute(text("""
+                        ALTER TABLE students 
+                        ADD COLUMN call_status VARCHAR(50) DEFAULT 'not_reached'
+                    """))
+                    conn.commit()
+                print("✅ Поле call_status добавлено")
+            else:
+                print("✅ Поле call_status уже существует")
+
+            # Добавляем поле decision_status (решил/думает)
+            if 'decision_status' not in existing_columns:
+                print("➕ Добавление поля decision_status в students...")
+                with engine.connect() as conn:
+                    conn.execute(text("""
+                        ALTER TABLE students 
+                        ADD COLUMN decision_status VARCHAR(50) DEFAULT 'thinking'
+                    """))
+                    conn.commit()
+                print("✅ Поле decision_status добавлено")
+            else:
+                print("✅ Поле decision_status уже существует")
+
+            # Добавляем поле documents_status (статус документов)
+            if 'documents_status' not in existing_columns:
+                print("➕ Добавление поля documents_status в students...")
+                with engine.connect() as conn:
+                    conn.execute(text("""
+                        ALTER TABLE students 
+                        ADD COLUMN documents_status VARCHAR(50) DEFAULT 'not_submitted'
+                    """))
+                    conn.commit()
+                print("✅ Поле documents_status добавлено")
+            else:
+                print("✅ Поле documents_status уже существует")
+
+            # Обновляем существующие записи значениями по умолчанию
+            print("🔄 Обновление существующих студентов значениями по умолчанию...")
             with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN active_contact VARCHAR(500) NULL"))
+                conn.execute(text("""
+                    UPDATE students 
+                    SET meeting_status = 'not_met' 
+                    WHERE meeting_status IS NULL
+                """))
+                conn.execute(text("""
+                    UPDATE students 
+                    SET call_status = 'not_reached' 
+                    WHERE call_status IS NULL
+                """))
+                conn.execute(text("""
+                    UPDATE students 
+                    SET decision_status = 'thinking' 
+                    WHERE decision_status IS NULL
+                """))
+                conn.execute(text("""
+                    UPDATE students 
+                    SET documents_status = 'not_submitted' 
+                    WHERE documents_status IS NULL
+                """))
                 conn.commit()
-            print("✅ Поле active_contact добавлено")
-        else:
-            print("✅ Поле active_contact уже существует")
-
-        # Добавляем active_contact_type если нет
-        if 'active_contact_type' not in existing_columns:
-            print("➕ Добавление поля active_contact_type...")
-            with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN active_contact_type VARCHAR(50) NULL"))
-                conn.commit()
-            print("✅ Поле active_contact_type добавлено")
-        else:
-            print("✅ Поле active_contact_type уже существует")
-
-        # Добавляем active_contact_updated_at если нет
-        if 'active_contact_updated_at' not in existing_columns:
-            print("➕ Добавление поля active_contact_updated_at...")
-            with engine.connect() as conn:
-                conn.execute(text("ALTER TABLE users ADD COLUMN active_contact_updated_at TIMESTAMP NULL"))
-                conn.commit()
-            print("✅ Поле active_contact_updated_at добавлено")
-        else:
-            print("✅ Поле active_contact_updated_at уже существует")
+            print("✅ Существующие студенты обновлены")
 
     except Exception as e:
         print(f"⚠️ Ошибка при обновлении схемы: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def get_db() -> Generator[Session, None, None]:
