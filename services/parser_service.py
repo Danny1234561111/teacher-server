@@ -66,10 +66,11 @@ GROUPS_CONFIG = [
 
 
 class ParserService:
-    """Сервис для парсинга данных абитуриентов - обновление существующих и создание новых с валидным ФИО"""
+    """Сервис для парсинга данных абитуриентов"""
 
     def __init__(self, db: Session):
         self.db = db
+        self._api_students_cache = {}  # Кэш для хранения всех студентов из API
 
         # Статистика по всем группам
         self.all_stats = {
@@ -427,10 +428,7 @@ class ParserService:
             return None, False
 
     def update_or_create_student(self, item: Dict, group_config: Dict) -> tuple[Optional[Student], bool]:
-        """
-        Обновляет существующего студента или создает нового,
-        но только если у него есть валидное ФИО (не "Студент XXX")
-        """
+        """Обновляет существующего студента или создает нового с валидным ФИО"""
         try:
             russian_id = item.get('Абитуриент') or item.get('УникальныйКодПоступающего')
             if not russian_id:
@@ -447,7 +445,6 @@ class ParserService:
             is_new = False
 
             if not student:
-                # Создаем только если есть валидное ФИО
                 if not is_valid_name:
                     logger.debug(f"⏭️ Пропуск создания студента ID {russian_id}: невалидное ФИО ('{full_name}')")
                     return None, False
@@ -463,7 +460,6 @@ class ParserService:
                 self.db.add(student)
                 self.db.flush()
             else:
-                # Обновляем ФИО только если оно валидное и отличается
                 if is_valid_name and full_name != student.full_name:
                     logger.info(f"📝 Обновление ФИО студента {russian_id}: '{student.full_name}' -> '{full_name}'")
                     student.full_name = full_name
@@ -551,147 +547,119 @@ class ParserService:
 
         return stats
 
-    def _calculate_passing_score(self, applications: List[StudentApplication], budget_places: int) -> int:
-        """Рассчитывает текущий проходной балл"""
-        if not applications or budget_places <= 0:
-            return 0
-
-        consented = [app for app in applications
-                     if app.consent_status and app.study_basis == StudyBasis.BUDGET and app.total_score]
-
-        if not consented:
-            return 0
-
-        sorted_scores = sorted([app.total_score for app in consented if app.total_score], reverse=True)
-
-        if len(sorted_scores) >= budget_places:
-            return sorted_scores[budget_places - 1]
-
-        return sorted_scores[-1] if sorted_scores else 0
-
-    def calculate_group_statistics(self, group_config: Dict) -> Dict[str, Any]:
-        """Рассчитывает статистику по группе"""
-        try:
-            department = self.db.query(Department).filter(
-                Department.name == group_config['department_name']
-            ).first()
-
-            if not department:
-                return self._empty_statistics()
-
-            speciality = self.db.query(Speciality).filter(
-                Speciality.name == group_config['speciality_name'],
-                Speciality.department_id == department.id
-            ).first()
-
-            if not speciality:
-                return self._empty_statistics()
-
-            query = self.db.query(StudentApplication).filter(
-                StudentApplication.department_id == department.id,
-                StudentApplication.speciality_id == speciality.id,
-                StudentApplication.study_form == group_config.get('study_form'),
-                StudentApplication.study_basis == group_config.get('study_basis'),
-            )
-
-            profile = self.db.query(Profile).filter(
-                Profile.name == group_config['profile_name'],
-                Profile.speciality_id == speciality.id
-            ).first()
-
-            if profile:
-                query = query.filter(StudentApplication.profile_id == profile.id)
-
-            applications = query.all()
-
-            total_applications = len(applications)
-
-            applications_submitted = len([
-                a for a in applications
-                if a.application_status != ApplicationStatus.PENDING or a.total_score
-            ])
-
-            enrolled = len([a for a in applications if a.application_status == ApplicationStatus.ACCEPTED])
-
-            scores = [a.total_score for a in applications if a.total_score and a.total_score > 0]
-            avg_score = sum(scores) / len(scores) if scores else 0
-            min_score = min(scores) if scores else 0
-            max_score = max(scores) if scores else 0
-
-            budget_stats = {
-                "total": group_config.get('budget_places', 0),
-                "filled": 0,
-                "free": group_config.get('budget_places', 0),
-                "applicants_in_range": 0,
-                "applicants_with_consent": 0,
-                "passing_score": 0
-            }
-
-            paid_stats = {
-                "total": group_config.get('paid_places', 0),
-                "filled": 0,
-                "free": group_config.get('paid_places', 0),
-                "applicants_with_consent": 0
-            }
-
-            target_stats = {
-                "total": group_config.get('target_places', 0),
-                "filled": 0,
-                "free": group_config.get('target_places', 0),
-                "applicants_with_consent": 0
-            }
-
-            budget_applications = []
-            for app in applications:
-                if app.study_basis == StudyBasis.BUDGET:
-                    budget_applications.append(app)
-                    if app.consent_status:
-                        budget_stats["applicants_with_consent"] += 1
-
-                    if app.position and app.position <= budget_stats["total"]:
-                        budget_stats["applicants_in_range"] += 1
-                        budget_stats["filled"] = max(budget_stats["filled"], app.position)
-
-                elif app.study_basis == StudyBasis.PAID:
-                    if app.consent_status:
-                        paid_stats["applicants_with_consent"] += 1
-                    if app.position and app.position <= paid_stats["total"]:
-                        paid_stats["filled"] = max(paid_stats["filled"], app.position)
-
-                elif app.study_basis == StudyBasis.TARGET:
-                    if app.consent_status:
-                        target_stats["applicants_with_consent"] += 1
-                    if app.position and app.position <= target_stats["total"]:
-                        target_stats["filled"] = max(target_stats["filled"], app.position)
-
-            budget_stats["free"] = max(0, budget_stats["total"] - budget_stats["filled"])
-            budget_stats["passing_score"] = self._calculate_passing_score(budget_applications, budget_stats["total"])
-
-            paid_stats["free"] = max(0, paid_stats["total"] - paid_stats["filled"])
-            target_stats["free"] = max(0, target_stats["total"] - target_stats["filled"])
-
-            competition = round(total_applications / max(budget_stats["total"], 1), 2) if budget_stats["total"] > 0 else 0
-
-            return {
-                "total_applications": total_applications,
-                "applications_submitted": applications_submitted,
-                "enrolled": enrolled,
-                "average_score": round(avg_score, 2),
-                "min_score": min_score,
-                "max_score": max_score,
-                "budget": budget_stats,
-                "paid": paid_stats,
-                "target": target_stats,
-                "competition": competition,
-                "passing_score_current": budget_stats["passing_score"],
-                "passing_score_last_year": group_config.get('passing_score_2024', 0)
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Ошибка расчета статистики: {e}")
-            import traceback
-            traceback.print_exc()
+    def _calculate_statistics_from_api_data(self, group_config: Dict, api_data: List[Dict]) -> Dict[str, Any]:
+        """Рассчитывает статистику на основе данных из API (все абитуриенты группы)"""
+        if not api_data:
             return self._empty_statistics()
+
+        total_applications = len(api_data)
+
+        # Подавшие документы (имеют баллы или статус не "Подано")
+        applications_submitted = len([
+            item for item in api_data
+            if item.get('СуммаБаллов') and int(item.get('СуммаБаллов', 0)) > 0
+        ])
+
+        # Зачисленные (статус "Зачислен")
+        enrolled = len([
+            item for item in api_data
+            if item.get('СостояниеЗаявления') == 'Зачислен' or item.get('Состояние заявления') == 'Зачислен'
+        ])
+
+        # Сбор баллов
+        scores = []
+        for item in api_data:
+            score = item.get('СуммаБаллов')
+            if score:
+                try:
+                    scores.append(int(score))
+                except (ValueError, TypeError):
+                    pass
+
+        avg_score = sum(scores) / len(scores) if scores else 0
+        min_score = min(scores) if scores else 0
+        max_score = max(scores) if scores else 0
+
+        # Бюджетные места
+        budget_total = group_config.get('budget_places', 0)
+
+        # Подсчет мест
+        positions = []
+        consent_count = 0
+        for item in api_data:
+            position = item.get('Место') or item.get('Место в конкурсе')
+            if position:
+                try:
+                    pos = int(position)
+                    positions.append(pos)
+                except (ValueError, TypeError):
+                    pass
+
+            # Согласие на зачисление
+            consent = item.get('СогласиеНаЗачисление') or item.get('Согласие на зачисление')
+            if consent == 'Да':
+                consent_count += 1
+
+        filled = max(positions) if positions else 0
+        if filled > budget_total:
+            filled = budget_total
+
+        # Проходной балл
+        passing_score = 0
+        if positions:
+            # Сортируем абитуриентов по баллам
+            sorted_by_score = sorted(api_data, key=lambda x: int(x.get('СуммаБаллов', 0)) if x.get('СуммаБаллов') else 0, reverse=True)
+            if len(sorted_by_score) >= budget_total and budget_total > 0:
+                last_accepted = sorted_by_score[budget_total - 1]
+                passing_score = int(last_accepted.get('СуммаБаллов', 0)) if last_accepted.get('СуммаБаллов') else 0
+
+        budget_stats = {
+            "total": budget_total,
+            "filled": filled,
+            "free": max(0, budget_total - filled),
+            "applicants_in_range": len([p for p in positions if p <= budget_total]),
+            "applicants_with_consent": consent_count,
+            "passing_score": passing_score
+        }
+
+        # Платные и целевые места (если есть)
+        paid_stats = {
+            "total": group_config.get('paid_places', 0),
+            "filled": 0,
+            "free": group_config.get('paid_places', 0),
+            "applicants_with_consent": 0
+        }
+
+        target_stats = {
+            "total": group_config.get('target_places', 0),
+            "filled": 0,
+            "free": group_config.get('target_places', 0),
+            "applicants_with_consent": 0
+        }
+
+        competition = round(total_applications / max(budget_total, 1), 2) if budget_total > 0 else 0
+
+        return {
+            "total_applications": total_applications,
+            "applications_submitted": applications_submitted,
+            "enrolled": enrolled,
+            "average_score": round(avg_score, 2),
+            "min_score": min_score,
+            "max_score": max_score,
+            "budget": budget_stats,
+            "paid": paid_stats,
+            "target": target_stats,
+            "competition": competition,
+            "passing_score_current": passing_score,
+            "passing_score_last_year": group_config.get('passing_score_2024', 0)
+        }
+
+    def calculate_group_statistics(self, group_config: Dict, api_data: List[Dict] = None) -> Dict[str, Any]:
+        """Рассчитывает статистику по группе на основе API данных"""
+        if api_data is None:
+            api_data = []
+
+        return self._calculate_statistics_from_api_data(group_config, api_data)
 
     def _empty_statistics(self) -> Dict[str, Any]:
         """Пустая статистика"""
@@ -739,6 +707,7 @@ class ParserService:
         logger.info("🚀 ЗАПУСК ПАРСЕРА АБИТУРИЕНТОВ")
         logger.info("=" * 60)
 
+        # Сначала собираем все данные со всех групп
         all_groups_data = []
         for group_config in GROUPS_CONFIG:
             logger.info(f"\n📌 Получение данных группы: {group_config['name']}")
@@ -755,6 +724,12 @@ class ParserService:
         if not all_groups_data:
             logger.error("❌ Нет данных ни по одной группе")
             return self.all_stats
+
+        # Сохраняем API данные для последующего расчета статистики
+        api_data_by_group = {}
+        for group_data in all_groups_data:
+            group_config = group_data['config']
+            api_data_by_group[group_config['name']] = group_data['data']
 
         # Группируем заявления по студентам
         students_applications = {}
@@ -790,7 +765,6 @@ class ParserService:
                     else:
                         self.all_stats["total"]["students_updated"] += 1
 
-                    # ВАЖНО: передаем student.id, а не student
                     app_stats = self.process_student_applications(student.id, applications_data)
 
                     self.all_stats["total"]["applications_created"] += app_stats["created"]
@@ -808,16 +782,19 @@ class ParserService:
                 self.all_stats["total"]["errors"] += 1
                 self.db.rollback()
 
-        # Рассчитываем статистику по каждой группе
+        # Рассчитываем статистику по каждой группе на основе API данных (всех абитуриентов)
         for group_config in GROUPS_CONFIG:
-            group_statistics = self.calculate_group_statistics(group_config)
+            api_data = api_data_by_group.get(group_config['name'], [])
+            group_statistics = self.calculate_group_statistics(group_config, api_data)
 
             self.all_stats["groups"][group_config['name']] = {
                 "config": group_config,
-                "statistics": group_statistics
+                "statistics": group_statistics,
+                "total_in_api": len(api_data)
             }
 
             logger.info(f"\n📊 СТАТИСТИКА ГРУППЫ '{group_config['name']}':")
+            logger.info(f"   Всего абитуриентов в API: {len(api_data)}")
             logger.info(f"   Всего заявлений: {group_statistics['total_applications']}")
             logger.info(f"   Подало документы: {group_statistics['applications_submitted']}")
             logger.info(f"   Поступило (зачислено): {group_statistics['enrolled']}")
