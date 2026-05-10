@@ -468,7 +468,8 @@ class ParserService:
         for item in api_data:
             # Проверяем, что абитуриент подал заявление на этот профиль
             # В API могут быть поля: 'Профиль', 'Направление подготовки', 'Конкурсная группа'
-            item_profile = item.get('Профиль') or item.get('Направление подготовки') or item.get('Конкурсная группа', {})
+            item_profile = item.get('Профиль') or item.get('Направление подготовки') or item.get('Конкурсная группа',
+                                                                                                 {})
             if isinstance(item_profile, dict):
                 item_profile_name = item_profile.get('name', '')
             else:
@@ -538,7 +539,9 @@ class ParserService:
         passing_score = 0
         if budget_total > 0 and scores:
             # Сортируем абитуриентов по баллам
-            sorted_items = sorted(filtered_data, key=lambda x: int(x.get('СуммаБаллов', 0)) if x.get('СуммаБаллов') else 0, reverse=True)
+            sorted_items = sorted(filtered_data,
+                                  key=lambda x: int(x.get('СуммаБаллов', 0)) if x.get('СуммаБаллов') else 0,
+                                  reverse=True)
             if len(sorted_items) >= budget_total:
                 last_accepted = sorted_items[budget_total - 1]
                 passing_score = int(last_accepted.get('СуммаБаллов', 0)) if last_accepted.get('СуммаБаллов') else 0
@@ -716,7 +719,6 @@ def run_parser_once():
         return stats
     finally:
         db.close()
-ф
 
 if __name__ == "__main__":
     run_parser_once()
