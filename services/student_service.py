@@ -6,7 +6,7 @@ from datetime import datetime
 from database.schema import (
     Student, User, Communication, Department, Speciality, Profile, StudentApplication,
     StudentStatus, ApplicationStatus, ContactStatus, PriorContact, ContactType,
-    StudyLevel, StudyForm, StudyBasis, MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus
+    StudyLevel, StudyForm, StudyBasis, MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus, UserRole
 )
 
 
@@ -45,15 +45,11 @@ class StudentService:
         user = db.query(User).filter(User.id == user_id).first()
 
         if not user:
-            # Если пользователь не найден, возвращаем пустой список
             return []
 
-        # ПРОВЕРКА РОЛИ - приводим к верхнему регистру для сравнения
-        user_role = user.role.upper() if hasattr(user.role, 'upper') else str(user.role).upper()
-
-        # Админ видит всех студентов
-        if user_role == 'ADMIN':
-            # Админ видит всех - ничего не фильтруем
+        # ПРОВЕРКА РОЛИ - для Enum сравниваем с UserRole.ADMIN
+        if user.role == UserRole.ADMIN:
+            # Админ видит всех студентов - ничего не фильтруем
             pass
         else:
             # Для TEACHER - показываем только своих студентов
@@ -381,11 +377,8 @@ class StudentService:
         if not user:
             return False
 
-        # Приводим роль к верхнему регистру для сравнения
-        user_role = user.role.upper() if hasattr(user.role, 'upper') else str(user.role).upper()
-
         # Админ имеет доступ ко всем студентам
-        if user_role == 'ADMIN':
+        if user.role == UserRole.ADMIN:
             return True
 
         # Преподаватель - только к своим
