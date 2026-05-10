@@ -652,54 +652,19 @@ async def get_student_applications(
         db: Session = Depends(get_db)
 ):
     """Получение всех заявлений студента на специальности"""
-    student = student_service.get_student_by_id(
-        student_id=student_id,
-        user_id=current_user.id,
-        db=db
-    )
+    # Проверяем существование студента
+    student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
-        raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
 
-    applications = db.query(StudentApplication).filter(
-        StudentApplication.student_id == student_id
-    ).all()
+    # Проверяем доступ
+    if not student_service._can_access_student(student, current_user.id, db):
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
 
-    result = []
-    for app in applications:
-        department = db.query(Department).filter(Department.id == app.department_id).first()
-        speciality = db.query(Speciality).filter(Speciality.id == app.speciality_id).first()
-        profile = db.query(Profile).filter(Profile.id == app.profile_id).first() if app.profile_id else None
+    # Используем метод сервиса для получения заявлений
+    applications = student_service.get_student_applications(student_id, db)
 
-        result.append({
-            "id": app.id,
-            "student_id": app.student_id,
-            "department_id": app.department_id,
-            "department_name": department.name if department else None,
-            "speciality_id": app.speciality_id,
-            "speciality_name": speciality.name if speciality else None,
-            "profile_id": app.profile_id,
-            "profile_name": profile.name if profile else None,
-            "position": app.position,
-            "priority": app.priority,
-            "total_score": app.total_score,
-            "application_status": app.application_status.value if app.application_status else None,
-            "consent_status": app.consent_status if app.consent_status is not None else False,
-            "participation": app.participation if app.participation is not None else True,
-            "is_main_contest": app.is_main_contest if app.is_main_contest is not None else False,
-            "study_form": app.study_form.value if app.study_form else None,
-            "study_basis": app.study_basis.value if app.study_basis else None,
-            "study_level": app.study_level.value if app.study_level else None,
-            "budget_places_total": app.budget_places_total,
-            "budget_places_filled": app.budget_places_filled,
-            "paid_places_total": app.paid_places_total,
-            "paid_places_filled": app.paid_places_filled,
-            "target_places_total": app.target_places_total,
-            "target_places_filled": app.target_places_filled,
-            "created_at": app.created_at,
-            "updated_at": app.updated_at
-        })
-
-    return result
+    return applications
 
 
 @router.get("/{student_id}/competitive-info", response_model=CompetitiveInfoResponse)
