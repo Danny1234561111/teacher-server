@@ -48,7 +48,7 @@ class StudentService:
         #    - Студентов, которые подали заявления на направления/специальности/профили,
         #      прикрепленные к куратору (assigned_departments, assigned_specialities, assigned_profiles)
 
-        if user.role == 'admin':
+        if user.role == 'ADMIN':
             # Админ видит всех студентов
             pass
         else:
