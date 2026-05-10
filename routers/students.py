@@ -415,8 +415,8 @@ class StudentApplicationResponse(BaseModel):
     paid_places_filled: Optional[int] = None
     target_places_total: Optional[int] = None
     target_places_filled: Optional[int] = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -670,7 +670,6 @@ async def get_student_applications(
     # Формируем результат
     result = []
     for app in applications:
-        # Получаем связанные данные
         department = db.query(Department).filter(Department.id == app.department_id).first()
         speciality = db.query(Speciality).filter(Speciality.id == app.speciality_id).first()
         profile = db.query(Profile).filter(Profile.id == app.profile_id).first() if app.profile_id else None
