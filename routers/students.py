@@ -9,7 +9,7 @@ from services.student_service import StudentService
 from services.communication_service import CommunicationService
 from services.auth_service import AuthService
 from database.database import get_db
-from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus, StudyForm, \
+from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus,Student, StudyForm, \
     StudyBasis, StudyLevel, MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus
 
 router = APIRouter(prefix="", tags=["Students"])
@@ -652,19 +652,59 @@ async def get_student_applications(
         db: Session = Depends(get_db)
 ):
     """Получение всех заявлений студента на специальности"""
-    # Проверяем существование студента
+    # Получаем студента напрямую из БД как объект
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Абитуриент не найден")
 
     # Проверяем доступ
-    if not student_service._can_access_student(student, current_user.id, db):
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if user.role != UserRole.ADMIN and student.kurator_id != current_user.id:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
 
-    # Используем метод сервиса для получения заявлений
-    applications = student_service.get_student_applications(student_id, db)
+    # Получаем все заявления студента
+    applications = db.query(StudentApplication).filter(
+        StudentApplication.student_id == student_id
+    ).all()
 
-    return applications
+    # Формируем результат
+    result = []
+    for app in applications:
+        # Получаем связанные данные
+        department = db.query(Department).filter(Department.id == app.department_id).first()
+        speciality = db.query(Speciality).filter(Speciality.id == app.speciality_id).first()
+        profile = db.query(Profile).filter(Profile.id == app.profile_id).first() if app.profile_id else None
+
+        result.append(StudentApplicationResponse(
+            id=app.id,
+            student_id=app.student_id,
+            department_id=app.department_id,
+            department_name=department.name if department else None,
+            speciality_id=app.speciality_id,
+            speciality_name=speciality.name if speciality else None,
+            profile_id=app.profile_id,
+            profile_name=profile.name if profile else None,
+            position=app.position,
+            priority=app.priority,
+            total_score=app.total_score,
+            application_status=app.application_status.value if app.application_status else None,
+            consent_status=app.consent_status if app.consent_status is not None else False,
+            participation=app.participation if app.participation is not None else True,
+            is_main_contest=app.is_main_contest if app.is_main_contest is not None else False,
+            study_form=app.study_form.value if app.study_form else None,
+            study_basis=app.study_basis.value if app.study_basis else None,
+            study_level=app.study_level.value if app.study_level else None,
+            budget_places_total=app.budget_places_total,
+            budget_places_filled=app.budget_places_filled,
+            paid_places_total=app.paid_places_total,
+            paid_places_filled=app.paid_places_filled,
+            target_places_total=app.target_places_total,
+            target_places_filled=app.target_places_filled,
+            created_at=app.created_at,
+            updated_at=app.updated_at
+        ))
+
+    return result
 
 
 @router.get("/{student_id}/competitive-info", response_model=CompetitiveInfoResponse)
