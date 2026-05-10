@@ -460,23 +460,46 @@ class ParserService:
         if not api_data:
             return self._empty_statistics()
 
-        total_applications = len(api_data)
+        # Фильтруем абитуриентов, которые подали заявление на этот профиль
+        # В API данные содержат поле profile_name или нужно фильтровать по другим признакам
+        profile_name = group_config.get('profile_name')
+
+        filtered_data = []
+        for item in api_data:
+            # Проверяем, что абитуриент подал заявление на этот профиль
+            # В API могут быть поля: 'Профиль', 'Направление подготовки', 'Конкурсная группа'
+            item_profile = item.get('Профиль') or item.get('Направление подготовки') or item.get('Конкурсная группа', {})
+            if isinstance(item_profile, dict):
+                item_profile_name = item_profile.get('name', '')
+            else:
+                item_profile_name = str(item_profile) if item_profile else ''
+
+            # Если профиль совпадает или если нет информации о профиле (для отладки)
+            if profile_name in item_profile_name or not item_profile_name:
+                filtered_data.append(item)
+
+        # Если после фильтрации нет данных, используем все данные
+        if not filtered_data:
+            logger.warning(f"⚠️ Не найдено абитуриентов с профилем '{profile_name}', используется вся группа")
+            filtered_data = api_data
+
+        total_applications = len(filtered_data)
 
         # Подавшие документы (имеют баллы)
         applications_submitted = len([
-            item for item in api_data
+            item for item in filtered_data
             if item.get('СуммаБаллов') and int(item.get('СуммаБаллов', 0)) > 0
         ])
 
         # Зачисленные
         enrolled = len([
-            item for item in api_data
+            item for item in filtered_data
             if item.get('СостояниеЗаявления') == 'Зачислен' or item.get('Состояние заявления') == 'Зачислен'
         ])
 
         # Сбор баллов
         scores = []
-        for item in api_data:
+        for item in filtered_data:
             score = item.get('СуммаБаллов')
             if score:
                 try:
@@ -494,7 +517,7 @@ class ParserService:
         # Подсчет мест и согласий
         positions = []
         consent_count = 0
-        for item in api_data:
+        for item in filtered_data:
             position = item.get('Место') or item.get('Место в конкурсе')
             if position:
                 try:
@@ -511,11 +534,11 @@ class ParserService:
         if filled > budget_total:
             filled = budget_total
 
-        # Проходной балл
+        # Проходной балл (балл последнего зачисленного в пределах бюджетных мест)
         passing_score = 0
         if budget_total > 0 and scores:
-            sorted_items = sorted(api_data, key=lambda x: int(x.get('СуммаБаллов', 0)) if x.get('СуммаБаллов') else 0,
-                                  reverse=True)
+            # Сортируем абитуриентов по баллам
+            sorted_items = sorted(filtered_data, key=lambda x: int(x.get('СуммаБаллов', 0)) if x.get('СуммаБаллов') else 0, reverse=True)
             if len(sorted_items) >= budget_total:
                 last_accepted = sorted_items[budget_total - 1]
                 passing_score = int(last_accepted.get('СуммаБаллов', 0)) if last_accepted.get('СуммаБаллов') else 0
@@ -559,7 +582,6 @@ class ParserService:
             "passing_score_current": passing_score,
             "passing_score_last_year": group_config.get('passing_score_2024', 0)
         }
-
     def get_students_by_criteria(self, study_form: StudyForm = None, study_basis: StudyBasis = None) -> List[Student]:
         """Получает студентов, подавших заявления с определенной формой/основой"""
         query = self.db.query(Student).join(StudentApplication)
@@ -694,7 +716,7 @@ def run_parser_once():
         return stats
     finally:
         db.close()
-
+ф
 
 if __name__ == "__main__":
     run_parser_once()
