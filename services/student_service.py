@@ -1,3 +1,4 @@
+# services/student_service.py
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session, joinedload
 from datetime import datetime
@@ -39,16 +40,54 @@ class StudentService:
         query = db.query(Student)
 
         user = db.query(User).filter(User.id == user_id).first()
+
+        # Логика доступа:
+        # 1. Админ видит всех студентов
+        # 2. Куратор видит:
+        #    - Студентов, закрепленных за ним (kurator_id == user_id)
+        #    - Студентов, которые подали заявления на направления/специальности/профили,
+        #      прикрепленные к куратору (assigned_departments, assigned_specialities, assigned_profiles)
+
         if user.role == 'admin':
+            # Админ видит всех студентов
             pass
         else:
-            if user.assigned_departments:
-                query = query.join(StudentApplication).filter(
-                    StudentApplication.department_id.in_(user.assigned_departments)
-                ).distinct()
-            else:
-                query = query.filter(Student.kurator_id == user_id)
+            # Куратор: собираем ID студентов по разным критериям
+            student_ids = set()
 
+            # 1. Студенты, закрепленные напрямую за куратором
+            direct_students = db.query(Student.id).filter(Student.kurator_id == user_id).all()
+            student_ids.update([s[0] for s in direct_students])
+
+            # 2. Студенты, подавшие заявления на прикрепленные направления
+            if user.assigned_departments:
+                dept_students = db.query(StudentApplication.student_id).filter(
+                    StudentApplication.department_id.in_(user.assigned_departments)
+                ).all()
+                student_ids.update([s[0] for s in dept_students])
+
+            # 3. Студенты, подавшие заявления на прикрепленные специальности
+            if user.assigned_specialities:
+                spec_students = db.query(StudentApplication.student_id).filter(
+                    StudentApplication.speciality_id.in_(user.assigned_specialities)
+                ).all()
+                student_ids.update([s[0] for s in spec_students])
+
+            # 4. Студенты, подавшие заявления на прикрепленные профили
+            if user.assigned_profiles:
+                prof_students = db.query(StudentApplication.student_id).filter(
+                    StudentApplication.profile_id.in_(user.assigned_profiles)
+                ).all()
+                student_ids.update([s[0] for s in prof_students])
+
+            # Применяем фильтрацию по ID
+            if student_ids:
+                query = query.filter(Student.id.in_(student_ids))
+            else:
+                # Если нет ни прямых студентов, ни студентов по привязкам - возвращаем пустой список
+                return []
+
+        # Применяем остальные фильтры
         if status:
             try:
                 query = query.filter(Student.status == StudentStatus(status))
@@ -365,16 +404,37 @@ class StudentService:
         """Проверка доступа пользователя к абитуриенту"""
         user = db.query(User).filter(User.id == user_id).first()
 
+        # Админ имеет доступ ко всем студентам
         if user.role == 'admin':
             return True
 
+        # Проверка прямого закрепления студента за куратором
         if student.kurator_id == user_id:
             return True
 
+        # Проверка по прикрепленным направлениям
         if user.assigned_departments:
             application = db.query(StudentApplication).filter(
                 StudentApplication.student_id == student.id,
                 StudentApplication.department_id.in_(user.assigned_departments)
+            ).first()
+            if application:
+                return True
+
+        # Проверка по прикрепленным специальностям
+        if user.assigned_specialities:
+            application = db.query(StudentApplication).filter(
+                StudentApplication.student_id == student.id,
+                StudentApplication.speciality_id.in_(user.assigned_specialities)
+            ).first()
+            if application:
+                return True
+
+        # Проверка по прикрепленным профилям
+        if user.assigned_profiles:
+            application = db.query(StudentApplication).filter(
+                StudentApplication.student_id == student.id,
+                StudentApplication.profile_id.in_(user.assigned_profiles)
             ).first()
             if application:
                 return True

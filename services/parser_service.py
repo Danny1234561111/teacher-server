@@ -104,7 +104,8 @@ class ParserService:
 
         return department
 
-    def _get_or_create_speciality(self, speciality_name: str, department_id: int, code: str = None) -> Optional[Speciality]:
+    def _get_or_create_speciality(self, speciality_name: str, department_id: int, code: str = None) -> Optional[
+        Speciality]:
         """Получает или создает специальность"""
         speciality = self.db.query(Speciality).filter(
             Speciality.name == speciality_name,
@@ -278,7 +279,8 @@ class ParserService:
         invalid_statuses = ['Отказано', 'Отозвано', 'Аннулировано']
         return status_name not in invalid_statuses if status_name else True
 
-    def update_or_create_application(self, item: Dict, group_config: Dict, student: Student, priority: Optional[int] = None) -> tuple[Optional[StudentApplication], bool]:
+    def update_or_create_application(self, item: Dict, group_config: Dict, student: Student,
+                                     priority: Optional[int] = None) -> tuple[Optional[StudentApplication], bool]:
         """Обновляет или создает заявление студента на конкретную специальность"""
         try:
             department = self._get_or_create_department(
@@ -304,7 +306,7 @@ class ParserService:
                 StudentApplication.profile_id == profile.id,
                 StudentApplication.study_form == group_config.get('study_form'),
                 StudentApplication.study_basis == group_config.get('study_basis'),
-                ).first()
+            ).first()
 
             is_new = False
             if not application:
@@ -504,7 +506,8 @@ class ParserService:
         max_applications = 5
         applications_to_process = valid_applications[:max_applications]
 
-        logger.debug(f"Студент {student_id} подает {len(applications_to_process)} заявлений (из {len(valid_applications)} валидных)")
+        logger.debug(
+            f"Студент {student_id} подает {len(applications_to_process)} заявлений (из {len(valid_applications)} валидных)")
 
         # Создаем или обновляем заявления
         for item, config, priority in applications_to_process:
@@ -587,7 +590,7 @@ class ParserService:
                 StudentApplication.speciality_id == speciality.id,
                 StudentApplication.study_form == group_config.get('study_form'),
                 StudentApplication.study_basis == group_config.get('study_basis'),
-                )
+            )
 
             profile = self.db.query(Profile).filter(
                 Profile.name == group_config['profile_name'],
@@ -665,7 +668,8 @@ class ParserService:
             paid_stats["free"] = max(0, paid_stats["total"] - paid_stats["filled"])
             target_stats["free"] = max(0, target_stats["total"] - target_stats["filled"])
 
-            competition = round(total_applications / max(budget_stats["total"], 1), 2) if budget_stats["total"] > 0 else 0
+            competition = round(total_applications / max(budget_stats["total"], 1), 2) if budget_stats[
+                                                                                              "total"] > 0 else 0
 
             return {
                 "total_applications": total_applications,
@@ -697,7 +701,8 @@ class ParserService:
             "average_score": 0,
             "min_score": 0,
             "max_score": 0,
-            "budget": {"total": 0, "filled": 0, "free": 0, "applicants_in_range": 0, "applicants_with_consent": 0, "passing_score": 0},
+            "budget": {"total": 0, "filled": 0, "free": 0, "applicants_in_range": 0, "applicants_with_consent": 0,
+                       "passing_score": 0},
             "paid": {"total": 0, "filled": 0, "free": 0, "applicants_with_consent": 0},
             "target": {"total": 0, "filled": 0, "free": 0, "applicants_with_consent": 0},
             "competition": 0,
@@ -716,7 +721,8 @@ class ParserService:
 
         return query.distinct().all()
 
-    def get_applications_by_form_and_basis(self, study_form: StudyForm = None, study_basis: StudyBasis = None) -> List[StudentApplication]:
+    def get_applications_by_form_and_basis(self, study_form: StudyForm = None, study_basis: StudyBasis = None) -> List[
+        StudentApplication]:
         """Получает заявления по форме обучения и основе"""
         query = self.db.query(StudentApplication)
 
@@ -772,7 +778,8 @@ class ParserService:
         # Обрабатываем каждого студента
         for student_idx, (student_russian_id, applications_data) in enumerate(students_applications.items(), 1):
             try:
-                logger.debug(f"\n🔄 Обработка студента {student_idx}/{len(students_applications)}: ID {student_russian_id}")
+                logger.debug(
+                    f"\n🔄 Обработка студента {student_idx}/{len(students_applications)}: ID {student_russian_id}")
 
                 # Создаем или обновляем студента (берем первое заявление для базовой информации)
                 first_item = applications_data[0][0]
