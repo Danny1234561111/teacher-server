@@ -941,7 +941,6 @@ async def get_student_competitive_info_for_speciality(
 
 
 # ===== ЭНДПОИНТ ДЛЯ СТАТИСТИКИ ПО ГРУППАМ =====
-
 @router.get("/statistics/groups", response_model=List[GroupStatisticsResponse])
 async def get_group_statistics(
         current_user: User = Depends(get_current_user),
@@ -953,8 +952,15 @@ async def get_group_statistics(
     parser_service = ParserService(db)
     results = []
 
+    # Сначала получаем данные из API для всех групп
     for group_config in GROUPS_CONFIG:
-        stats = parser_service.calculate_group_statistics(group_config)
+        # Получаем данные из API
+        data = parser_service.fetch_group_data(group_config['uid'])
+        api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
+
+        # Считаем статистику из API данных (всех абитуриентов группы)
+        stats = parser_service.calculate_statistics_from_api_data(group_config, api_data)
+
         results.append(GroupStatisticsResponse(
             group_name=group_config['name'],
             study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
