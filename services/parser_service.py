@@ -66,7 +66,7 @@ GROUPS_CONFIG = [
 
 
 class ParserService:
-    """Сервис для парсинга данных абитуриентов - только обновление существующих"""
+    """Сервис для парсинга данных абитуриентов - обновление существующих и создание новых с валидным ФИО"""
 
     def __init__(self, db: Session):
         self.db = db
@@ -217,7 +217,7 @@ class ParserService:
         return f"Студент {item.get('Абитуриент', '')}"
 
     def _has_valid_full_name(self, full_name: str) -> bool:
-        """Проверяет, является ли ФИО валидным (не "Студент XXX")"""
+        """Проверяет, является ли ФИО валидным (не "Студент XXX" и не пустое)"""
         if not full_name:
             return False
         if full_name.startswith('Студент'):
@@ -287,7 +287,7 @@ class ParserService:
         invalid_statuses = ['Отказано', 'Отозвано', 'Аннулировано']
         return status_name not in invalid_statuses if status_name else True
 
-    def update_or_create_application(self, item: Dict, group_config: Dict, student: Student,
+    def update_or_create_application(self, item: Dict, group_config: Dict, student_id: int,
                                      priority: Optional[int] = None) -> tuple[Optional[StudentApplication], bool]:
         """Обновляет или создает заявление студента на конкретную специальность"""
         try:
@@ -307,7 +307,7 @@ class ParserService:
             )
 
             application = self.db.query(StudentApplication).filter(
-                StudentApplication.student_id == student.id,
+                StudentApplication.student_id == student_id,
                 StudentApplication.department_id == department.id,
                 StudentApplication.speciality_id == speciality.id,
                 StudentApplication.profile_id == profile.id,
@@ -320,7 +320,7 @@ class ParserService:
                 logger.debug(f"   ➕ Создание заявления на {group_config['profile_name']}")
                 is_new = True
                 application = StudentApplication(
-                    student_id=student.id,
+                    student_id=student_id,
                     department_id=department.id,
                     speciality_id=speciality.id,
                     profile_id=profile.id,
@@ -428,8 +428,8 @@ class ParserService:
 
     def update_or_create_student(self, item: Dict, group_config: Dict) -> tuple[Optional[Student], bool]:
         """
-        Обновляет существующего студента.
-        НЕ СОЗДАЕТ НОВЫХ СТУДЕНТОВ! Только обновляет уже существующих.
+        Обновляет существующего студента или создает нового,
+        но только если у него есть валидное ФИО (не "Студент XXX")
         """
         try:
             russian_id = item.get('Абитуриент') or item.get('УникальныйКодПоступающего')
@@ -437,40 +437,48 @@ class ParserService:
                 logger.warning("⚠️ Нет ID абитуриента")
                 return None, False
 
-            # Получаем ФИО из API
             full_name = self._get_full_name(item)
+            is_valid_name = self._has_valid_full_name(full_name)
 
-            # Проверяем, существует ли студент в базе
             student = self.db.query(Student).filter(
                 Student.russian_student_id == int(russian_id)
             ).first()
 
-            # Если студент не найден - НЕ СОЗДАЕМ нового (только обновляем существующих)
+            is_new = False
+
             if not student:
-                # Проверяем, есть ли у студента валидное ФИО (для логирования)
-                if self._has_valid_full_name(full_name):
-                    logger.info(f"ℹ️ Найден новый студент с ID {russian_id} и ФИО '{full_name}', но он не будет добавлен (парсер только обновляет)")
-                else:
-                    logger.debug(f"⏭️ Пропуск студента с ID {russian_id}: нет в БД и нет ФИО")
-                return None, False
+                # Создаем только если есть валидное ФИО
+                if not is_valid_name:
+                    logger.debug(f"⏭️ Пропуск создания студента ID {russian_id}: невалидное ФИО ('{full_name}')")
+                    return None, False
 
-            # Обновляем ФИО только если оно валидное и отличается от "Студент XXX"
-            if self._has_valid_full_name(full_name) and full_name != student.full_name:
-                logger.info(f"📝 Обновление ФИО студента {russian_id}: '{student.full_name}' -> '{full_name}'")
-                student.full_name = full_name
+                logger.info(f"➕ Создание нового студента с ID {russian_id}, ФИО: {full_name}")
+                is_new = True
+                student = Student(
+                    russian_student_id=int(russian_id),
+                    full_name=full_name,
+                    status=StudentStatus.ACTIVE,
+                    contact_status=ContactStatus.NEW
+                )
+                self.db.add(student)
+                self.db.flush()
+            else:
+                # Обновляем ФИО только если оно валидное и отличается
+                if is_valid_name and full_name != student.full_name:
+                    logger.info(f"📝 Обновление ФИО студента {russian_id}: '{student.full_name}' -> '{full_name}'")
+                    student.full_name = full_name
 
-            # Обновляем учебную информацию
-            if not student.study_level and group_config.get('study_level'):
-                student.study_level = group_config.get('study_level')
-            if not student.study_form and group_config.get('study_form'):
-                student.study_form = group_config.get('study_form')
-            if not student.study_basis and group_config.get('study_basis'):
-                student.study_basis = group_config.get('study_basis')
+                if not student.study_level and group_config.get('study_level'):
+                    student.study_level = group_config.get('study_level')
+                if not student.study_form and group_config.get('study_form'):
+                    student.study_form = group_config.get('study_form')
+                if not student.study_basis and group_config.get('study_basis'):
+                    student.study_basis = group_config.get('study_basis')
 
             student.imported_at = datetime.utcnow()
             student.updated_at = datetime.utcnow()
 
-            return student, False  # is_new всегда False
+            return student, is_new
 
         except Exception as e:
             logger.error(f"❌ Ошибка обработки студента: {e}")
@@ -726,12 +734,11 @@ class ParserService:
         return query.all()
 
     def run_parser(self) -> Dict:
-        """Запускает парсинг - ТОЛЬКО ОБНОВЛЯЕТ существующих студентов"""
+        """Запускает парсинг для всех настроенных групп"""
         logger.info("=" * 60)
-        logger.info("🚀 ЗАПУСК ПАРСЕРА (только обновление существующих студентов)")
+        logger.info("🚀 ЗАПУСК ПАРСЕРА АБИТУРИЕНТОВ")
         logger.info("=" * 60)
 
-        # Сначала собираем все данные со всех групп
         all_groups_data = []
         for group_config in GROUPS_CONFIG:
             logger.info(f"\n📌 Получение данных группы: {group_config['name']}")
@@ -749,7 +756,7 @@ class ParserService:
             logger.error("❌ Нет данных ни по одной группе")
             return self.all_stats
 
-        # Группируем заявления по студентам (только тех, кто уже есть в БД)
+        # Группируем заявления по студентам
         students_applications = {}
 
         for group_data in all_groups_data:
@@ -759,27 +766,18 @@ class ParserService:
                 if not student_id:
                     continue
 
-                # Проверяем, существует ли студент в БД
-                existing_student = self.db.query(Student).filter(
-                    Student.russian_student_id == int(student_id)
-                ).first()
-
-                # Пропускаем студентов, которых нет в БД
-                if not existing_student:
-                    continue
-
                 if student_id not in students_applications:
                     students_applications[student_id] = []
 
                 priority = self._get_priority_from_item(item)
                 students_applications[student_id].append((item, group_config, priority))
 
-        logger.info(f"\n📊 Найдено {len(students_applications)} существующих абитуриентов для обновления")
+        logger.info(f"\n📊 Найдено {len(students_applications)} уникальных абитуриентов")
 
         # Обрабатываем каждого студента
         for student_idx, (student_russian_id, applications_data) in enumerate(students_applications.items(), 1):
             try:
-                logger.debug(f"\n🔄 Обновление студента {student_idx}/{len(students_applications)}: ID {student_russian_id}")
+                logger.debug(f"\n🔄 Обработка студента {student_idx}/{len(students_applications)}: ID {student_russian_id}")
 
                 first_item = applications_data[0][0]
                 first_config = applications_data[0][1]
@@ -787,9 +785,13 @@ class ParserService:
                 student, is_new = self.update_or_create_student(first_item, first_config)
 
                 if student:
-                    self.all_stats["total"]["students_updated"] += 1
+                    if is_new:
+                        self.all_stats["total"]["students_created"] += 1
+                    else:
+                        self.all_stats["total"]["students_updated"] += 1
 
-                    app_stats = self.process_student_applications(student, applications_data)
+                    # ВАЖНО: передаем student.id, а не student
+                    app_stats = self.process_student_applications(student.id, applications_data)
 
                     self.all_stats["total"]["applications_created"] += app_stats["created"]
                     self.all_stats["total"]["applications_updated"] += app_stats["updated"]
@@ -833,6 +835,7 @@ class ParserService:
 
         logger.info("\n" + "=" * 60)
         logger.info("📊 ИТОГОВАЯ СТАТИСТИКА ПО ВСЕМ ГРУППАМ:")
+        logger.info(f"   Всего создано студентов: {self.all_stats['total']['students_created']}")
         logger.info(f"   Всего обновлено студентов: {self.all_stats['total']['students_updated']}")
         logger.info(f"   Всего пропущено студентов: {self.all_stats['total']['students_skipped']}")
         logger.info(f"   Создано заявлений: {self.all_stats['total']['applications_created']}")
