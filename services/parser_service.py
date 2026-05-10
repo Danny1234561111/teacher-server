@@ -70,7 +70,6 @@ class ParserService:
 
     def __init__(self, db: Session):
         self.db = db
-        self._api_students_cache = {}  # Кэш для хранения всех студентов из API
 
         # Статистика по всем группам
         self.all_stats = {
@@ -547,14 +546,14 @@ class ParserService:
 
         return stats
 
-    def _calculate_statistics_from_api_data(self, group_config: Dict, api_data: List[Dict]) -> Dict[str, Any]:
-        """Рассчитывает статистику на основе данных из API (все абитуриенты группы)"""
+    def calculate_group_statistics_from_api(self, group_config: Dict, api_data: List[Dict]) -> Dict[str, Any]:
+        """Рассчитывает статистику по группе на основе данных из API (всех абитуриентов)"""
         if not api_data:
             return self._empty_statistics()
 
         total_applications = len(api_data)
 
-        # Подавшие документы (имеют баллы или статус не "Подано")
+        # Подавшие документы (имеют баллы)
         applications_submitted = len([
             item for item in api_data
             if item.get('СуммаБаллов') and int(item.get('СуммаБаллов', 0)) > 0
@@ -583,34 +582,33 @@ class ParserService:
         # Бюджетные места
         budget_total = group_config.get('budget_places', 0)
 
-        # Подсчет мест
+        # Подсчет мест и согласий
         positions = []
         consent_count = 0
         for item in api_data:
             position = item.get('Место') or item.get('Место в конкурсе')
             if position:
                 try:
-                    pos = int(position)
-                    positions.append(pos)
+                    positions.append(int(position))
                 except (ValueError, TypeError):
                     pass
 
-            # Согласие на зачисление
             consent = item.get('СогласиеНаЗачисление') or item.get('Согласие на зачисление')
             if consent == 'Да':
                 consent_count += 1
 
+        # Заполненные места
         filled = max(positions) if positions else 0
         if filled > budget_total:
             filled = budget_total
 
         # Проходной балл
         passing_score = 0
-        if positions:
+        if budget_total > 0 and scores:
             # Сортируем абитуриентов по баллам
-            sorted_by_score = sorted(api_data, key=lambda x: int(x.get('СуммаБаллов', 0)) if x.get('СуммаБаллов') else 0, reverse=True)
-            if len(sorted_by_score) >= budget_total and budget_total > 0:
-                last_accepted = sorted_by_score[budget_total - 1]
+            sorted_items = sorted(api_data, key=lambda x: int(x.get('СуммаБаллов', 0)) if x.get('СуммаБаллов') else 0, reverse=True)
+            if len(sorted_items) >= budget_total:
+                last_accepted = sorted_items[budget_total - 1]
                 passing_score = int(last_accepted.get('СуммаБаллов', 0)) if last_accepted.get('СуммаБаллов') else 0
 
         budget_stats = {
@@ -622,18 +620,21 @@ class ParserService:
             "passing_score": passing_score
         }
 
-        # Платные и целевые места (если есть)
+        # Платные места
+        paid_total = group_config.get('paid_places', 0)
         paid_stats = {
-            "total": group_config.get('paid_places', 0),
+            "total": paid_total,
             "filled": 0,
-            "free": group_config.get('paid_places', 0),
+            "free": paid_total,
             "applicants_with_consent": 0
         }
 
+        # Целевые места
+        target_total = group_config.get('target_places', 0)
         target_stats = {
-            "total": group_config.get('target_places', 0),
+            "total": target_total,
             "filled": 0,
-            "free": group_config.get('target_places', 0),
+            "free": target_total,
             "applicants_with_consent": 0
         }
 
@@ -654,12 +655,9 @@ class ParserService:
             "passing_score_last_year": group_config.get('passing_score_2024', 0)
         }
 
-    def calculate_group_statistics(self, group_config: Dict, api_data: List[Dict] = None) -> Dict[str, Any]:
-        """Рассчитывает статистику по группе на основе API данных"""
-        if api_data is None:
-            api_data = []
-
-        return self._calculate_statistics_from_api_data(group_config, api_data)
+    def calculate_group_statistics(self, group_config: Dict) -> Dict[str, Any]:
+        """Рассчитывает статистику по группе (устаревший метод, используйте calculate_group_statistics_from_api)"""
+        return self._empty_statistics()
 
     def _empty_statistics(self) -> Dict[str, Any]:
         """Пустая статистика"""
@@ -785,7 +783,7 @@ class ParserService:
         # Рассчитываем статистику по каждой группе на основе API данных (всех абитуриентов)
         for group_config in GROUPS_CONFIG:
             api_data = api_data_by_group.get(group_config['name'], [])
-            group_statistics = self.calculate_group_statistics(group_config, api_data)
+            group_statistics = self.calculate_group_statistics_from_api(group_config, api_data)
 
             self.all_stats["groups"][group_config['name']] = {
                 "config": group_config,
