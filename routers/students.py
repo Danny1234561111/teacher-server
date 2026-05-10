@@ -10,7 +10,7 @@ from services.communication_service import CommunicationService
 from services.auth_service import AuthService
 from database.database import get_db
 from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus,Student, StudyForm, \
-    StudyBasis, StudyLevel, MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus
+    UserRole,StudyBasis, StudyLevel, MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus
 
 router = APIRouter(prefix="", tags=["Students"])
 security = HTTPBearer()
