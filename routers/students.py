@@ -940,26 +940,78 @@ async def get_student_competitive_info_for_speciality(
     )
 
 
-# ===== ЭНДПОИНТ ДЛЯ СТАТИСТИКИ ПО ГРУППАМ =====
 @router.get("/statistics/groups", response_model=List[GroupStatisticsResponse])
 async def get_group_statistics(
         current_user: User = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    """Получение статистики по всем конкурсным группам"""
-    from services.parser_service import ParserService, GROUPS_CONFIG
+    """Получение статистики по всем конкурсным группам из Profile"""
+    from services.parser_service import GROUPS_CONFIG
 
-    parser_service = ParserService(db)
     results = []
 
-    # Сначала получаем данные из API для всех групп
     for group_config in GROUPS_CONFIG:
-        # Получаем данные из API
-        data = parser_service.fetch_group_data(group_config['uid'])
-        api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
+        # Находим профиль
+        department = db.query(Department).filter(
+            Department.name == group_config['department_name']
+        ).first()
 
-        # Считаем статистику из API данных (всех абитуриентов группы)
-        stats = parser_service.calculate_statistics_from_api_data(group_config, api_data)
+        if not department:
+            continue
+
+        speciality = db.query(Speciality).filter(
+            Speciality.name == group_config['speciality_name'],
+            Speciality.department_id == department.id
+        ).first()
+
+        if not speciality:
+            continue
+
+        profile = db.query(Profile).filter(
+            Profile.name == group_config['profile_name'],
+            Profile.speciality_id == speciality.id
+        ).first()
+
+        if not profile:
+            # Если профиля нет в БД, получаем свежие данные из API
+            from services.parser_service import ParserService
+            parser = ParserService(db)
+            data = parser.fetch_group_data(group_config['uid'])
+            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
+            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
+        else:
+            # Берем статистику из профиля
+            stats = {
+                "total_applications": profile.total_applications or 0,
+                "applications_submitted": profile.applications_submitted or 0,
+                "enrolled": profile.enrolled or 0,
+                "average_score": profile.average_score or 0,
+                "min_score": profile.min_score or 0,
+                "max_score": profile.max_score or 0,
+                "budget": {
+                    "total": profile.budget_places or 0,
+                    "filled": profile.budget_filled or 0,
+                    "free": profile.budget_free or 0,
+                    "applicants_in_range": profile.budget_applicants_in_range or 0,
+                    "applicants_with_consent": profile.budget_applicants_with_consent or 0,
+                    "passing_score": profile.budget_passing_score or 0
+                },
+                "paid": {
+                    "total": profile.paid_places or 0,
+                    "filled": profile.paid_filled or 0,
+                    "free": profile.paid_free or 0,
+                    "applicants_with_consent": profile.paid_applicants_with_consent or 0
+                },
+                "target": {
+                    "total": profile.target_places or 0,
+                    "filled": profile.target_filled or 0,
+                    "free": profile.target_free or 0,
+                    "applicants_with_consent": profile.target_applicants_with_consent or 0
+                },
+                "competition": profile.competition or 0,
+                "passing_score_current": profile.passing_score_current or 0,
+                "passing_score_last_year": profile.passing_score_last_year or 0
+            }
 
         results.append(GroupStatisticsResponse(
             group_name=group_config['name'],

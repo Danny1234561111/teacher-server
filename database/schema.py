@@ -156,10 +156,42 @@ class Profile(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # ===== НОВЫЕ ПОЛЯ ДЛЯ СТАТИСТИКИ ГРУППЫ =====
+    # Общая статистика
+    total_applications = Column(Integer, default=0, comment="Всего заявлений в группе")
+    applications_submitted = Column(Integer, default=0, comment="Подало документы")
+    enrolled = Column(Integer, default=0, comment="Зачислено")
+    average_score = Column(Float, default=0, comment="Средний балл")
+    min_score = Column(Integer, default=0, comment="Минимальный балл")
+    max_score = Column(Integer, default=0, comment="Максимальный балл")
+    competition = Column(Float, default=0, comment="Конкурс чел/место")
+
+    # Бюджетная статистика
+    budget_filled = Column(Integer, default=0, comment="Бюджетных мест заполнено")
+    budget_free = Column(Integer, default=0, comment="Бюджетных мест свободно")
+    budget_applicants_in_range = Column(Integer, default=0, comment="Абитуриентов в пределах мест")
+    budget_applicants_with_consent = Column(Integer, default=0, comment="Подало согласие на бюджет")
+    budget_passing_score = Column(Integer, default=0, comment="Проходной балл на бюджет")
+
+    # Платная статистика
+    paid_filled = Column(Integer, default=0, comment="Платных мест заполнено")
+    paid_free = Column(Integer, default=0, comment="Платных мест свободно")
+    paid_applicants_with_consent = Column(Integer, default=0, comment="Подало согласие на платное")
+
+    # Целевая статистика
+    target_filled = Column(Integer, default=0, comment="Целевых мест заполнено")
+    target_free = Column(Integer, default=0, comment="Целевых мест свободно")
+    target_applicants_with_consent = Column(Integer, default=0, comment="Подало согласие на целевое")
+
+    # Проходные баллы
+    passing_score_current = Column(Integer, default=0, comment="Текущий проходной балл")
+    passing_score_last_year = Column(Integer, default=0, comment="Проходной балл прошлого года")
+
+    # Время последнего обновления статистики
+    statistics_updated_at = Column(DateTime, nullable=True, comment="Время последнего обновления статистики")
+
     speciality = relationship("Speciality", back_populates="profiles")
     applications = relationship("StudentApplication", back_populates="profile")
-
-
 # Модель StudentApplication (Заявление абитуриента на специальность)
 class StudentApplication(Base):
     __tablename__ = "student_applications"
