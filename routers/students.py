@@ -447,6 +447,7 @@ class CompetitiveInfoResponse(BaseModel):
 class GroupStatisticsResponse(BaseModel):
     """Статистика по конкурсной группе"""
     group_name: str
+    profile_id: Optional[int] = None  # ДОБАВЬ ЭТО ПОЛЕ!
     study_form: Optional[str]
     study_basis: Optional[str]
     total_applications: int
@@ -979,6 +980,7 @@ async def get_group_statistics(
             data = parser.fetch_group_data(group_config['uid'])
             api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
             stats = parser.calculate_statistics_from_api_data(group_config, api_data)
+            profile_id = None
         else:
             # Берем статистику из профиля
             stats = {
@@ -1012,9 +1014,11 @@ async def get_group_statistics(
                 "passing_score_current": profile.passing_score_current or 0,
                 "passing_score_last_year": profile.passing_score_last_year or 0
             }
+            profile_id = profile.id
 
         results.append(GroupStatisticsResponse(
             group_name=group_config['name'],
+            profile_id=profile_id,  # ДОБАВЬ ЭТО ПОЛЕ!
             study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
             study_basis=group_config.get('study_basis').value if group_config.get('study_basis') else None,
             total_applications=stats['total_applications'],

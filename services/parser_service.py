@@ -101,7 +101,8 @@ class ParserService:
 
         return department
 
-    def _get_or_create_speciality(self, speciality_name: str, department_id: int, code: str = None) -> Optional[Speciality]:
+    def _get_or_create_speciality(self, speciality_name: str, department_id: int, code: str = None) -> Optional[
+        Speciality]:
         """Получает или создает специальность"""
         speciality = self.db.query(Speciality).filter(
             Speciality.name == speciality_name,
@@ -121,7 +122,8 @@ class ParserService:
 
         return speciality
 
-    def _get_or_create_profile(self, profile_name: str, speciality_id: int, group_config: Dict = None) -> Optional[Profile]:
+    def _get_or_create_profile(self, profile_name: str, speciality_id: int, group_config: Dict = None) -> Optional[
+        Profile]:
         """Получает или создает профиль с обновлением базовых параметров"""
         profile = self.db.query(Profile).filter(
             Profile.name == profile_name,
@@ -265,7 +267,8 @@ class ParserService:
 
         return scores
 
-    def update_or_create_application(self, item: Dict, group_config: Dict, student: Student, profile: Profile) -> tuple[Optional[StudentApplication], bool]:
+    def update_or_create_application(self, item: Dict, group_config: Dict, student: Student, profile: Profile) -> tuple[
+        Optional[StudentApplication], bool]:
         """Обновляет или создает заявление студента на конкретную специальность"""
         try:
             department = self._get_or_create_department(
@@ -285,7 +288,7 @@ class ParserService:
                 StudentApplication.profile_id == profile.id,
                 StudentApplication.study_form == group_config.get('study_form'),
                 StudentApplication.study_basis == group_config.get('study_basis'),
-                ).first()
+            ).first()
 
             is_new = False
             if not application:
@@ -400,7 +403,8 @@ class ParserService:
             traceback.print_exc()
             return None, False
 
-    def update_or_create_student(self, item: Dict, group_config: Dict, profile: Profile) -> tuple[Optional[Student], bool]:
+    def update_or_create_student(self, item: Dict, group_config: Dict, profile: Profile) -> tuple[
+        Optional[Student], bool]:
         """Обновляет существующего или создает нового студента"""
         try:
             russian_id = item.get('Абитуриент') or item.get('УникальныйКодПоступающего')
@@ -453,7 +457,8 @@ class ParserService:
                 if is_new_application:
                     logger.debug(f"   ✅ Добавлено заявление на {group_config['profile_name']}")
                 else:
-                    logger.debug(f"   ✅ Обновлено заявление на {group_config['profile_name']} (место: {application.position})")
+                    logger.debug(
+                        f"   ✅ Обновлено заявление на {group_config['profile_name']} (место: {application.position})")
 
             student.imported_at = datetime.utcnow()
             student.updated_at = datetime.utcnow()
@@ -480,7 +485,8 @@ class ParserService:
 
         filtered_data = []
         for item in api_data:
-            item_profile = item.get('Профиль') or item.get('Направление подготовки') or item.get('Конкурсная группа', {})
+            item_profile = item.get('Профиль') or item.get('Направление подготовки') or item.get('Конкурсная группа',
+                                                                                                 {})
             if isinstance(item_profile, dict):
                 item_profile_name = item_profile.get('name', '')
             else:
@@ -603,7 +609,8 @@ class ParserService:
             "average_score": 0,
             "min_score": 0,
             "max_score": 0,
-            "budget": {"total": 0, "filled": 0, "free": 0, "applicants_in_range": 0, "applicants_with_consent": 0, "passing_score": 0},
+            "budget": {"total": 0, "filled": 0, "free": 0, "applicants_in_range": 0, "applicants_with_consent": 0,
+                       "passing_score": 0},
             "paid": {"total": 0, "filled": 0, "free": 0, "applicants_with_consent": 0},
             "target": {"total": 0, "filled": 0, "free": 0, "applicants_with_consent": 0},
             "competition": 0,
@@ -865,6 +872,7 @@ def run_parser_once():
         return stats
     finally:
         db.close()
+
 
 if __name__ == "__main__":
     run_parser_once()
