@@ -289,6 +289,9 @@ class User(Base):
     active_contact_type = Column(String(50), nullable=True)
     active_contact_updated_at = Column(DateTime, nullable=True)
 
+    telegram_open_on = Column(String, default="pc")
+    vk_open_on = Column(String, default="pc")
+    url_open_on = Column(String, default="pc")
     created_communications = relationship("Communication", foreign_keys="Communication.created_by",
                                           back_populates="creator")
     kurator_students = relationship("Student", foreign_keys="Student.kurator_id", back_populates="kurator")

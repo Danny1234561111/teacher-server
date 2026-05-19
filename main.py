@@ -1,15 +1,21 @@
-from fastapi import FastAPI
+# main.py
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+
 # Импортируем роутеры
-from routers import auth, admin,students,user_contact
+from routers import auth, admin, students, user_contact
 from database.database import init_db
 from services.scheduler import scheduler
+from services.auth_service import AuthService
+from services.websocket_manager import handle_mobile_websocket
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+auth_service = AuthService()
 
 
 @asynccontextmanager
@@ -59,11 +65,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Подключаем роутеры
+# Подключаем HTTP роутеры
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
-app.include_router(students.router, prefix="/api/students", tags=["Administration"])
-app.include_router(user_contact.router)
+app.include_router(students.router, prefix="/api/students", tags=["Students"])
+app.include_router(user_contact.router, prefix="/api/user/contact", tags=["User Contact"])
+
+
+# ===== WEBSOCKET ЭНДПОИНТ =====
+@app.websocket("/ws/mobile/{token}")
+async def websocket_mobile_endpoint(websocket: WebSocket, token: str):
+    """WebSocket для мобильного приложения"""
+    from database.database import get_db
+    db = next(get_db())
+
+    try:
+        user_data = auth_service.get_user_by_token(token, db)
+        if not user_data:
+            await websocket.close(code=1008, reason="Invalid token")
+            return
+
+        user_id = user_data['id']
+        await handle_mobile_websocket(websocket, user_id)
+
+    except Exception as e:
+        logger.error(f"Ошибка WebSocket: {e}")
+        await websocket.close(code=1011, reason="Internal error")
+    finally:
+        db.close()
 
 
 @app.get("/")
@@ -73,6 +102,9 @@ async def root():
         "version": "5.0.0",
         "status": "running",
         "database": "initialized",
+        "websocket": {
+            "mobile": "ws://localhost:8000/ws/mobile/{token}"
+        },
         "parser": {
             "status": "running" if scheduler.is_running else "stopped",
             "interval_hours": scheduler.interval_hours,
@@ -84,7 +116,6 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Простая проверка здоровья"""
     return {
         "status": "healthy",
         "database": "connected",
@@ -95,6 +126,5 @@ async def health_check():
 
 @app.post("/api/parser/run")
 async def run_parser_manually():
-    """Ручной запуск парсера (только для админов)"""
     scheduler.run_now()
     return {"status": "running", "message": "Парсер запущен"}
