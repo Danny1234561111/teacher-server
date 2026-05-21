@@ -102,7 +102,7 @@ class DecisionStatusEnum(str):
 
     @classmethod
     def get_valid_values(cls):
-        return [cls.THINKING, cls.DECIDED,cls.UNKNOWN]
+        return [cls.THINKING, cls.DECIDED,cls.DENIED,cls.UNKNOWN]
 
     @classmethod
     def normalize(cls, value: str) -> str:
