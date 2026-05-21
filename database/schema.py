@@ -79,24 +79,23 @@ class PriorContact(enum.Enum):
     PHONE = "звонок"
     URL = "ссылка"
 
-
-# ИСПРАВЛЕНО: значения в ВЕРХНЕМ РЕГИСТРЕ
 class MeetingStatus(enum.Enum):
     """Статус посещения встречи/сбора"""
     NOT_MET = "NOT_MET"
     MET = "MET"
-
-
+    UNKNOWN = "UNKNOWN"
 class CallStatus(enum.Enum):
     """Статус дозвона"""
     NOT_REACHED = "NOT_REACHED"
     REACHED = "REACHED"
+    UNKNOWN = "UNKNOWN"
 
 
 class DecisionStatus(enum.Enum):
     """Статус решения о поступлении"""
     THINKING = "THINKING"
     DECIDED = "DECIDED"
+    UNKNOWN = "UNKNOWN"
 
 
 class DocumentsStatus(enum.Enum):
@@ -253,9 +252,9 @@ class Student(Base):
     contact_type = Column(Enum(ContactType), nullable=True)
 
     # НОВЫЕ СТАТУСЫ из Figma - значения в ВЕРХНЕМ РЕГИСТРЕ
-    meeting_status = Column(Enum(MeetingStatus), default=MeetingStatus.NOT_MET)
-    call_status = Column(Enum(CallStatus), default=CallStatus.NOT_REACHED)
-    decision_status = Column(Enum(DecisionStatus), default=DecisionStatus.THINKING)
+    meeting_status = Column(Enum(MeetingStatus), default=MeetingStatus.UNKNOWN)
+    call_status = Column(Enum(CallStatus), default=CallStatus.UNKNOWN)
+    decision_status = Column(Enum(DecisionStatus), default=DecisionStatus.UNKNOWN)
     documents_status = Column(Enum(DocumentsStatus), default=DocumentsStatus.NOT_SUBMITTED)
 
     last_communication_date = Column(DateTime, nullable=True)

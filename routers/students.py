@@ -57,9 +57,10 @@ class ContactStatus(str):
 
 
 # НОВЫЕ ENUM для валидации статусов из Figma (UPPER CASE)
-class MeetingStatusEnum(str):
+class MeetingStatus(str):
     NOT_MET = "NOT_MET"
     MET = "MET"
+    UNKNOWN = "UNKNOWN"
 
     @classmethod
     def get_valid_values(cls):
@@ -74,10 +75,10 @@ class MeetingStatusEnum(str):
             return value_upper
         return cls.NOT_MET
 
-
-class CallStatusEnum(str):
+class CallStatus(str):
     NOT_REACHED = "NOT_REACHED"
     REACHED = "REACHED"
+    UNKNOWN = "UNKNOWN"
 
     @classmethod
     def get_valid_values(cls):
@@ -92,10 +93,11 @@ class CallStatusEnum(str):
             return value_upper
         return cls.NOT_REACHED
 
-
-class DecisionStatusEnum(str):
+class DecisionStatus(str):
+    """Статус решения о поступлении"""
     THINKING = "THINKING"
     DECIDED = "DECIDED"
+    UNKNOWN = "UNKNOWN"
 
     @classmethod
     def get_valid_values(cls):
@@ -373,9 +375,9 @@ class StudentResponse(BaseModel):
     updated_at: Optional[datetime]
 
     # НОВЫЕ ПОЛЯ (UPPER CASE)
-    meeting_status: Optional[str] = "NOT_MET"
-    call_status: Optional[str] = "NOT_REACHED"
-    decision_status: Optional[str] = "THINKING"
+    meeting_status: Optional[str] = "UNKNOWN"
+    call_status: Optional[str] = "UNKNOWN"
+    decision_status: Optional[str] = "UNKNOWN"
     documents_status: Optional[str] = "NOT_SUBMITTED"
 
     class Config:
