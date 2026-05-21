@@ -64,16 +64,16 @@ class MeetingStatusEnum(str):
 
     @classmethod
     def get_valid_values(cls):
-        return [cls.NOT_MET, cls.MET]
+        return [cls.NOT_MET, cls.MET, cls.UNKNOWN]
 
     @classmethod
     def normalize(cls, value: str) -> str:
         if not value:
-            return cls.NOT_MET
+            return cls.UNKNOWN
         value_upper = value.upper()
         if value_upper in cls.get_valid_values():
             return value_upper
-        return cls.NOT_MET
+        return cls.UNKNOWN
 
 class CallStatusEnum(str):
     NOT_REACHED = "NOT_REACHED"
@@ -82,16 +82,16 @@ class CallStatusEnum(str):
 
     @classmethod
     def get_valid_values(cls):
-        return [cls.NOT_REACHED, cls.REACHED]
+        return [cls.NOT_REACHED, cls.REACHED,cls.UNKNOWN]
 
     @classmethod
     def normalize(cls, value: str) -> str:
         if not value:
-            return cls.NOT_REACHED
+            return cls.UNKNOWN
         value_upper = value.upper()
         if value_upper in cls.get_valid_values():
             return value_upper
-        return cls.NOT_REACHED
+        return cls.UNKNOWN
 
 class DecisionStatusEnum(str):
     """Статус решения о поступлении"""
@@ -101,16 +101,16 @@ class DecisionStatusEnum(str):
 
     @classmethod
     def get_valid_values(cls):
-        return [cls.THINKING, cls.DECIDED]
+        return [cls.THINKING, cls.DECIDED,cls.UNKNOWN]
 
     @classmethod
     def normalize(cls, value: str) -> str:
         if not value:
-            return cls.THINKING
+            return cls.UNKNOWN
         value_upper = value.upper()
         if value_upper in cls.get_valid_values():
             return value_upper
-        return cls.THINKING
+        return cls.UNKNOWN
 
 
 class DocumentsStatusEnum(str):
