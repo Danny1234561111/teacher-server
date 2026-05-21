@@ -95,6 +95,7 @@ class DecisionStatus(enum.Enum):
     """Статус решения о поступлении"""
     THINKING = "THINKING"
     DECIDED = "DECIDED"
+    DENIED = "DENIED"
     UNKNOWN = "UNKNOWN"
 
 

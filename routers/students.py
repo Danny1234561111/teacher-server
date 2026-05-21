@@ -97,6 +97,7 @@ class DecisionStatusEnum(str):
     """Статус решения о поступлении"""
     THINKING = "THINKING"
     DECIDED = "DECIDED"
+    DENIED = "DENIED"
     UNKNOWN = "UNKNOWN"
 
     @classmethod
