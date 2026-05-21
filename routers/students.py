@@ -57,7 +57,7 @@ class ContactStatus(str):
 
 
 # НОВЫЕ ENUM для валидации статусов из Figma (UPPER CASE)
-class MeetingStatus(str):
+class MeetingStatusEnum(str):
     NOT_MET = "NOT_MET"
     MET = "MET"
     UNKNOWN = "UNKNOWN"
@@ -75,7 +75,7 @@ class MeetingStatus(str):
             return value_upper
         return cls.NOT_MET
 
-class CallStatus(str):
+class CallStatusEnum(str):
     NOT_REACHED = "NOT_REACHED"
     REACHED = "REACHED"
     UNKNOWN = "UNKNOWN"
@@ -93,7 +93,7 @@ class CallStatus(str):
             return value_upper
         return cls.NOT_REACHED
 
-class DecisionStatus(str):
+class DecisionStatusEnum(str):
     """Статус решения о поступлении"""
     THINKING = "THINKING"
     DECIDED = "DECIDED"
