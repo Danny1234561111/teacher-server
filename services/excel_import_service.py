@@ -1,6 +1,6 @@
 import pandas as pd
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set
 from datetime import datetime
 import re
 
@@ -13,13 +13,10 @@ from database.schema import (
 
 
 class ExcelImportService:
-    """Сервис для импорта абитуриентов из Excel"""
 
     def __init__(self, db: Session, user_id: int):
         self.db = db
         self.user_id = user_id
-
-        # Маппинг названий колонок
         self.column_mapping = {
             'фио': 'full_name',
             'ффио': 'full_name',
@@ -51,8 +48,6 @@ class ExcelImportService:
             'почта': 'email',
             'email': 'email'
         }
-
-        # Маппинг для формы обучения
         self.study_form_mapping = {
             'очная': StudyForm.FULL_TIME,
             'очная форма': StudyForm.FULL_TIME,
@@ -64,8 +59,6 @@ class ExcelImportService:
             'заочная форма': StudyForm.CORRESPONDENCE,
             'correspondence': StudyForm.CORRESPONDENCE,
         }
-
-        # Маппинг для основы обучения
         self.study_basis_mapping = {
             'бюджетная': StudyBasis.BUDGET,
             'бюджет': StudyBasis.BUDGET,
@@ -83,14 +76,11 @@ class ExcelImportService:
     async def import_from_dataframe(
             self,
             df: pd.DataFrame,
-            create_missing_profiles: bool = False
+            create_missing_profiles: bool = False,
+            duplicate_strategy: str = 'skip',
+            replace_ids: Set[int] = set()
     ) -> Dict[str, Any]:
-        """Импорт данных из DataFrame"""
-
-        # Нормализуем названия колонок
         df = self._normalize_columns(df)
-
-        # Проверяем наличие ОБЯЗАТЕЛЬНЫХ колонок
         missing_columns = []
         if 'full_name' not in df.columns:
             missing_columns.append('ФИО')
@@ -110,20 +100,22 @@ class ExcelImportService:
                 'warnings': [],
                 'message': f"Ошибка: в файле нет обязательных колонок: {', '.join(missing_columns)}"
             }
-
-        # Результаты импорта
         created_students = 0
         updated_students = 0
         created_applications = 0
         errors = []
         warnings = []
-
-        # Обрабатываем каждую строку
         for idx, row in df.iterrows():
             row_num = idx + 2
 
             try:
-                result = await self._process_row(row, row_num, create_missing_profiles)
+                result = await self._process_row(
+                    row=row,
+                    row_num=row_num,
+                    create_missing_profiles=create_missing_profiles,
+                    duplicate_strategy=duplicate_strategy,
+                    replace_ids=replace_ids
+                )
 
                 if result.get('error'):
                     errors.append({
@@ -133,7 +125,7 @@ class ExcelImportService:
                 else:
                     if result.get('created'):
                         created_students += 1
-                    elif result.get('updated'):
+                    if result.get('updated'):
                         updated_students += 1
 
                     created_applications += result.get('applications_created', 0)
@@ -150,7 +142,7 @@ class ExcelImportService:
                     "error": f"Ошибка обработки строки: {str(e)}"
                 })
 
-        # Коммитим все изменения
+        # Коммитим все изменения, если не было критических ошибок импорта строк
         if not errors:
             self.db.commit()
         else:
@@ -170,12 +162,10 @@ class ExcelImportService:
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         """Нормализует названия колонок"""
         df.columns = df.columns.str.strip().str.lower()
-
         rename_dict = {}
         for col in df.columns:
             if col in self.column_mapping:
                 rename_dict[col] = self.column_mapping[col]
-
         if rename_dict:
             df = df.rename(columns=rename_dict)
         return df
@@ -184,7 +174,9 @@ class ExcelImportService:
             self,
             row: pd.Series,
             row_num: int,
-            create_missing_profiles: bool = False
+            create_missing_profiles: bool,
+            duplicate_strategy: str,  # Новый параметр (получаем из роутера)
+            replace_ids: Set[int]  # Новый параметр (получаем из роутера)
     ) -> Dict[str, Any]:
         """Обрабатывает одну строку Excel"""
 
@@ -201,78 +193,84 @@ class ExcelImportService:
         if not full_name:
             result['error'] = "ФИО обязательно"
             return result
-        full_name = str(full_name).strip()
 
         # 2. Телефон (ОБЯЗАТЕЛЬНО)
-        phone = self._get_value(row, 'phone')
-        if not phone:
+        phone_raw = self._get_value(row, 'phone')
+        if not phone_raw:
             result['error'] = "Телефон обязателен"
             return result
-        phone = self._normalize_phone(str(phone).strip())
 
-        # 3. Russian Student ID (ОБЯЗАТЕЛЬНО - уникальный идентификатор)
-        russian_student_id = None
-        if 'russian_student_id' in row and pd.notna(row['russian_student_id']):
-            try:
-                russian_student_id = int(float(row['russian_student_id']))
-                if russian_student_id <= 0:
-                    result['error'] = "ID должен быть положительным числом"
-                    return result
-            except (ValueError, TypeError):
-                result['error'] = "ID должен быть числом"
-                return result
-        else:
+        # 3. Russian Student ID (ОБЯЗАТЕЛЬНО)
+        russian_student_id_raw = self._get_value(row, 'russian_student_id')
+        if russian_student_id_raw is None:
             result['error'] = "ID поступающего обязателен"
             return result
 
-        # 4. Email (опционально)
-        email = self._get_value(row, 'email')
-        if email:
-            email = str(email).strip()
+        try:
+            russian_student_id = int(float(russian_student_id_raw))
+            if russian_student_id <= 0:
+                result['error'] = "ID должен быть положительным числом"
+                return result
+        except (ValueError, TypeError):
+            result['error'] = "ID должен быть числом"
+            return result
 
-        # 5. ПОИСК СТУДЕНТА ПО УНИКАЛЬНОМУ ID
+        email_raw = self._get_value(row, 'email')
+        email = str(email_raw).strip() if email_raw else None
+
+        # --- НОВАЯ ЛОГИКА ОБРАБОТКИ ДУБЛИКАТОВ ---
         existing_student = self.db.query(Student).filter(
             Student.russian_student_id == russian_student_id
         ).first()
 
         if existing_student:
-            # Студент существует - обновляем данные
+            # --- ЛОГИКА ДЛЯ СУЩЕСТВУЮЩИХ СТУДЕНТОВ ---
+
+            if duplicate_strategy == 'skip':
+                result['error'] = f"Дубликат ID {russian_student_id}. Строка пропущена согласно стратегии."
+                return result
+
+            elif duplicate_strategy == 'replace_all':
+                # Просто идем дальше на ветку обновления (заменяем)
+                pass
+
+            elif duplicate_strategy == 'replace_selected':
+                if russian_student_id not in replace_ids:
+                    result['error'] = f"Дубликат ID {russian_student_id} не выбран для замены. Строка пропущена."
+                    return result
+                # Если ID в списке - идем дальше на ветку обновления
+
+            # --- ВЕТКА ОБНОВЛЕНИЯ / ЗАМЕНЫ ---
             result['updated'] = True
 
-            # Обновляем ФИО если изменилось
-            if existing_student.full_name != full_name:
-                existing_student.full_name = full_name
+            existing_student.full_name = str(full_name).strip()
+            existing_student.phone = self._normalize_phone(str(phone_raw))
 
-            # Обновляем телефон если изменился
-            if existing_student.phone != phone:
-                existing_student.phone = phone
-
-            # Обновляем email если указан
+            # Обновляем email если указан или изменился
             if email:
-                additional = existing_student.additional_contacts or {}
-                if additional.get('email') != email:
-                    additional['email'] = email
-                    existing_student.additional_contacts = additional
+                additional_contacts = existing_student.additional_contacts or {}
+                if additional_contacts.get('email') != email:
+                    additional_contacts['email'] = email
+                    existing_student.additional_contacts = additional_contacts
 
-            # Обновляем форму и основу обучения если указаны
-            study_form = self._parse_study_form(row)
-            if study_form and not existing_student.study_form:
-                existing_student.study_form = study_form
+            study_form_new = self._parse_study_form(row)
+            if study_form_new is not None:  # Обновляем только если в файле указано значение
+                existing_student.study_form = study_form_new
 
-            study_basis = self._parse_study_basis(row)
-            if study_basis and not existing_student.study_basis:
-                existing_student.study_basis = study_basis
+            study_basis_new = self._parse_study_basis(row)
+            if study_basis_new is not None:
+                existing_student.study_basis = study_basis_new
 
             existing_student.updated_at = datetime.utcnow()
             self.db.flush()
-            student = existing_student
+
+            student_for_apps = existing_student
 
         else:
-            # Студент не существует - создаем нового
             result['created'] = True
 
-            study_form = self._parse_study_form(row)
-            study_basis = self._parse_study_basis(row)
+            study_form_new = self._parse_study_form(row)
+            study_basis_new = self._parse_study_basis(row)
 
             additional_contacts = {}
             if email:
@@ -280,31 +278,27 @@ class ExcelImportService:
 
             new_student = Student(
                 russian_student_id=russian_student_id,
-                full_name=full_name,
-                phone=phone,
+                full_name=str(full_name).strip(),
+                phone=self._normalize_phone(str(phone_raw)),
                 additional_contacts=additional_contacts if additional_contacts else None,
-                study_form=study_form,
-                study_basis=study_basis,
+                study_form=study_form_new,
+                study_basis=study_basis_new,
                 status=StudentStatus.ACTIVE,
-                contact_status=ContactStatus.NEW,
-                meeting_status=MeetingStatus.NOT_MET,
-                call_status=CallStatus.NOT_REACHED,
-                decision_status=DecisionStatus.THINKING,
-                documents_status=DocumentsStatus.NOT_SUBMITTED,
                 kurator_id=self.user_id,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
             self.db.add(new_student)
             self.db.flush()
-            student = new_student
 
-        # 6. Заявление (опционально)
-        profile_name = self._get_value(row, 'profile_name')
-        if profile_name:
+            student_for_apps = new_student
+
+        # 6. Заявление (опционально) - логика не изменилась
+        profile_name_val = self._get_value(row, 'profile_name')
+        if profile_name_val and str(profile_name_val).strip():
             await self._process_application(
-                student=student,
-                profile_name=str(profile_name).strip(),
+                student=student_for_apps,
+                profile_name=str(profile_name_val).strip(),
                 row=row,
                 create_missing_profiles=create_missing_profiles,
                 result=result
@@ -312,125 +306,125 @@ class ExcelImportService:
 
         return result
 
-    async def _process_application(
-            self,
-            student: Student,
-            profile_name: str,
-            row: pd.Series,
-            create_missing_profiles: bool,
-            result: Dict
-    ):
-        """Обрабатывает заявление студента на профиль"""
 
-        # Ищем профиль по названию
+async def _process_application(
+        self,
+        student: Student,
+        profile_name: str,
+        row: pd.Series,
+        create_missing_profiles: bool,
+        result: Dict[str, Any]
+):
+    """Обрабатывает заявление студента на профиль"""
+
+    profile = self.db.query(Profile).filter(
+        Profile.name.ilike(f"%{profile_name}%")
+    ).first()
+
+    if not profile:
         profile = self.db.query(Profile).filter(
-            Profile.name.ilike(f"%{profile_name}%")
+            Profile.name.ilike(profile_name)
         ).first()
 
-        if not profile:
-            profile = self.db.query(Profile).filter(
-                Profile.name.ilike(profile_name)
-            ).first()
+    if not profile:
+        result['warnings'].append(f"Не найден профиль '{profile_name}'")
+        return
 
-        if not profile:
-            result['warnings'].append(f"Не найден профиль '{profile_name}'")
-            return
+    # Проверяем существующее заявление на этот же профиль для этого студента
+    existing_application = self.db.query(StudentApplication).filter(
+        StudentApplication.student_id == student.id,
+        StudentApplication.profile_id == profile.id
+    ).first()
 
-        # Проверяем существующее заявление
-        existing_application = self.db.query(StudentApplication).filter(
-            StudentApplication.student_id == student.id,
-            StudentApplication.profile_id == profile.id
-        ).first()
+    if existing_application:
+        result['warnings'].append(f"Заявление на профиль '{profile_name}' уже существует")
+        return
 
-        if existing_application:
-            result['warnings'].append(f"Заявление на профиль '{profile_name}' уже существует")
-            return
+    score_raw = self._get_value(row, 'score')
+    total_score = None
+    if score_raw is not None:
+        try:
+            total_score = int(float(score_raw))
+        except (ValueError, TypeError):
+            result['warnings'].append(f"Не удалось распознать баллы: {score_raw}")
 
-        # Получаем баллы
-        score = self._get_value(row, 'score')
-        total_score = None
-        if score:
-            try:
-                total_score = int(float(score))
-            except (ValueError, TypeError):
-                result['warnings'].append(f"Не удалось распознать баллы: {score}")
+    priority_raw = self._get_value(row, 'priority')
+    priority_value = None
+    if priority_raw is not None:
+        try:
+            priority_value = int(float(priority_raw))
+            priority_value = max(1, min(10, priority_value))  # Ограничиваем от 1 до 10
+        except (ValueError, TypeError):
+            priority_value = 1
 
-        # Получаем приоритет
-        priority = self._get_value(row, 'priority')
-        priority_value = None
-        if priority:
-            try:
-                priority_value = int(float(priority))
-                if priority_value < 1:
-                    priority_value = 1
-                if priority_value > 10:
-                    priority_value = 10
-            except (ValueError, TypeError):
-                priority_value = 1
+    study_form_for_apps = self._parse_study_form(row) or student.study_form or profile.study_form
+    study_basis_for_apps = self._parse_study_basis(row) or student.study_basis or profile.study_basis
 
-        # Форма и основа обучения
-        study_form = self._parse_study_form(row) or profile.study_form
-        study_basis = self._parse_study_basis(row) or profile.study_basis
+    application = StudentApplication(
+        student_id=student.id,
+        department_id=profile.speciality.department_id if profile.speciality else None,
+        speciality_id=profile.speciality_id,
+        profile_id=profile.id,
+        total_score=total_score,
+        priority=priority_value,
+        study_form=study_form_for_apps,
+        study_basis=study_basis_for_apps,
+        study_level=profile.study_level,
+        application_status=ApplicationStatus.PENDING,
+        consent_status=False,
+        participation=True,
+        created_at=datetime.utcnow(),
+        updated_at=datetime.utcnow()
+    )
 
-        # Создаем заявление
-        application = StudentApplication(
-            student_id=student.id,
-            department_id=profile.speciality.department_id if profile.speciality else None,
-            speciality_id=profile.speciality_id,
-            profile_id=profile.id,
-            total_score=total_score,
-            priority=priority_value,
-            study_form=study_form,
-            study_basis=study_basis,
-            study_level=profile.study_level,
-            application_status=ApplicationStatus.PENDING,
-            consent_status=False,
-            participation=True,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
-        )
-        self.db.add(application)
+    self.db.add(application)
+
+    # Увеличиваем счетчик только если приложение успешно создано и добавлено в сессию
+    try:
+        self.db.flush()
         result['applications_created'] += 1
+    except Exception as e:
+        result['warnings'].append(f"Ошибка при создании заявления: {str(e)}")
 
-    def _parse_study_form(self, row: pd.Series) -> Optional[StudyForm]:
-        """Парсит форму обучения"""
-        value = self._get_value(row, 'study_form')
-        if not value:
-            return None
 
-        str_value = str(value).strip().lower()
-        for key, form in self.study_form_mapping.items():
-            if key in str_value:
-                return form
+def _parse_study_form(self, row: pd.Series) -> Optional[StudyForm]:
+    """Парсит форму обучения"""
+    value = self._get_value(row, 'study_form')
+    if not value:
         return None
 
-    def _parse_study_basis(self, row: pd.Series) -> Optional[StudyBasis]:
-        """Парсит основу обучения"""
-        value = self._get_value(row, 'study_basis')
-        if not value:
-            return None
+    str_value = str(value).strip().lower()
+    for key, form in self.study_form_mapping.items():
+        if key in str_value or str_value in key:  # Улучшенный поиск
+            return form
+    return None
 
-        str_value = str(value).strip().lower()
-        for key, basis in self.study_basis_mapping.items():
-            if key in str_value:
-                return basis
+
+def _parse_study_basis(self, row: pd.Series) -> Optional[StudyBasis]:
+    """Парсит основу обучения"""
+    value = self._get_value(row, 'study_basis')
+    if not value:
         return None
 
-    def _get_value(self, row: pd.Series, key: str) -> Any:
-        """Безопасно получает значение из строки"""
-        if key in row and pd.notna(row[key]):
-            return row[key]
-        return None
+    str_value = str(value).strip().lower()
+    for key, basis in self.study_basis_mapping.items():
+        if key in str_value or str_value in key:
+            return basis
+    return None
 
-    def _normalize_phone(self, phone: str) -> str:
-        """Нормализует номер телефона"""
-        digits = re.sub(r'\D', '', phone)
 
-        if len(digits) == 11 and digits.startswith('8'):
-            digits = '7' + digits[1:]
-        if len(digits) == 11 and digits.startswith('7'):
-            return '+' + digits
-        if len(digits) == 10 and digits.startswith('9'):
-            return '+7' + digits
+def _get_value(self, row: pd.Series, key: str) -> Any:
+    if key in row and pd.notna(row[key]):
+        return row[key]
+    return None
 
-        return phone
+
+def _normalize_phone(self, phone: str) -> str:
+    digits = re.sub(r'\D', '', phone)
+    if len(digits) == 11 and digits.startswith('8'):
+        digits = '+7' + digits[1:]
+
+    if len(digits) == 11 and digits.startswith('7'):
+        return '+' + digits[1:]
+
+    return phone
