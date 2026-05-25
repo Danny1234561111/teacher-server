@@ -188,6 +188,15 @@ class ExcelImportService:
 
         return df
 
+    def _get_cell_value(self, row: pd.Series, column: str) -> Any:
+        """Безопасно получает значение ячейки из строки DataFrame"""
+        if column in row.index:
+            value = row[column]
+            if pd.isna(value):
+                return None
+            return value
+        return None
+
     async def _process_row(
             self,
             row: pd.Series,
@@ -206,28 +215,27 @@ class ExcelImportService:
             'error': None
         }
 
-        # 1. ФИО (ОБЯЗАТЕЛЬНО) - используем .get() и проверяем на NaN
-        full_name = row.get('full_name')
-        if pd.isna(full_name) or not str(full_name).strip():
+        # 1. ФИО (ОБЯЗАТЕЛЬНО)
+        full_name = self._get_cell_value(row, 'full_name')
+        if not full_name or not str(full_name).strip():
             result['error'] = "ФИО обязательно"
             return result
 
         # 2. Телефон (ОБЯЗАТЕЛЬНО)
-        phone_raw = row.get('phone')
-        if pd.isna(phone_raw) or not str(phone_raw).strip():
+        phone_raw = self._get_cell_value(row, 'phone')
+        if not phone_raw or not str(phone_raw).strip():
             result['error'] = "Телефон обязателен"
             return result
 
         # 3. Russian Student ID (ОБЯЗАТЕЛЬНО)
-        russian_student_id_raw = row.get('russian_student_id')
-        if pd.isna(russian_student_id_raw):
+        russian_student_id_raw = self._get_cell_value(row, 'russian_student_id')
+        if russian_student_id_raw is None:
             result['error'] = "ID поступающего обязателен"
             return result
 
         try:
-            # Пробуем преобразовать в int (поддерживаем числа и строки)
+            # Пробуем преобразовать в int
             if isinstance(russian_student_id_raw, str):
-                # Убираем пробелы и лишние символы
                 cleaned = re.sub(r'[^\d]', '', russian_student_id_raw)
                 russian_student_id = int(cleaned) if cleaned else None
             else:
@@ -241,8 +249,8 @@ class ExcelImportService:
             return result
 
         # Email (опционально)
-        email_raw = row.get('email')
-        email = str(email_raw).strip() if not pd.isna(email_raw) else None
+        email_raw = self._get_cell_value(row, 'email')
+        email = str(email_raw).strip() if email_raw else None
 
         # Логика обработки дубликатов
         existing_student = self.db.query(Student).filter(
@@ -250,27 +258,20 @@ class ExcelImportService:
         ).first()
 
         if existing_student:
-            # Логика для существующих студентов
             if duplicate_strategy == 'skip':
                 result['error'] = f"Дубликат ID {russian_student_id}. Строка пропущена согласно стратегии."
                 return result
-
-            elif duplicate_strategy == 'replace_all':
-                # Просто идем дальше на ветку обновления
-                pass
-
             elif duplicate_strategy == 'replace_selected':
                 if russian_student_id not in replace_ids:
                     result['error'] = f"Дубликат ID {russian_student_id} не выбран для замены. Строка пропущена."
                     return result
 
-            # Ветка обновления / замены
+            # Ветка обновления
             result['updated'] = True
 
             existing_student.full_name = str(full_name).strip()
             existing_student.phone = self._normalize_phone(str(phone_raw))
 
-            # Обновляем email если указан
             if email:
                 additional_contacts = existing_student.additional_contacts or {}
                 if additional_contacts.get('email') != email:
@@ -318,8 +319,8 @@ class ExcelImportService:
             student_for_apps = new_student
 
         # Обработка заявления
-        profile_name_val = row.get('profile_name')
-        if not pd.isna(profile_name_val) and str(profile_name_val).strip():
+        profile_name_val = self._get_cell_value(row, 'profile_name')
+        if profile_name_val and str(profile_name_val).strip():
             await self._process_application(
                 student=student_for_apps,
                 profile_name=str(profile_name_val).strip(),
@@ -340,7 +341,6 @@ class ExcelImportService:
     ):
         """Обрабатывает заявление студента на профиль"""
 
-        # Ищем профиль по имени (частичное совпадение)
         profile = self.db.query(Profile).filter(
             Profile.name.ilike(f"%{profile_name}%")
         ).first()
@@ -364,29 +364,25 @@ class ExcelImportService:
             result['warnings'].append(f"Заявление на профиль '{profile_name}' уже существует")
             return
 
-        # Получаем баллы
-        score_raw = row.get('score')
+        score_raw = self._get_cell_value(row, 'score')
         total_score = None
-        if not pd.isna(score_raw) and score_raw is not None:
+        if score_raw is not None:
             try:
                 total_score = int(float(score_raw))
             except (ValueError, TypeError):
                 result['warnings'].append(f"Не удалось распознать баллы: {score_raw}")
 
-        # Получаем приоритет
-        priority_raw = row.get('priority')
+        priority_raw = self._get_cell_value(row, 'priority')
         priority_value = None
-        if not pd.isna(priority_raw) and priority_raw is not None:
+        if priority_raw is not None:
             try:
                 priority_value = int(float(priority_raw))
                 priority_value = max(1, min(10, priority_value))
             except (ValueError, TypeError):
                 priority_value = 1
 
-        study_form_for_apps = self._parse_study_form(row) or student.study_form or (
-            profile.study_form if profile else None)
-        study_basis_for_apps = self._parse_study_basis(row) or student.study_basis or (
-            profile.study_basis if profile else None)
+        study_form_for_apps = self._parse_study_form(row) or student.study_form
+        study_basis_for_apps = self._parse_study_basis(row) or student.study_basis
 
         application = StudentApplication(
             student_id=student.id,
@@ -415,8 +411,8 @@ class ExcelImportService:
 
     def _parse_study_form(self, row: pd.Series) -> Optional[StudyForm]:
         """Парсит форму обучения"""
-        value = row.get('study_form')
-        if pd.isna(value) or not value:
+        value = self._get_cell_value(row, 'study_form')
+        if not value:
             return None
 
         str_value = str(value).strip().lower()
@@ -427,8 +423,8 @@ class ExcelImportService:
 
     def _parse_study_basis(self, row: pd.Series) -> Optional[StudyBasis]:
         """Парсит основу обучения"""
-        value = row.get('study_basis')
-        if pd.isna(value) or not value:
+        value = self._get_cell_value(row, 'study_basis')
+        if not value:
             return None
 
         str_value = str(value).strip().lower()
