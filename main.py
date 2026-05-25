@@ -71,7 +71,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(students.router, prefix="/api/students", tags=["Students"])
 app.include_router(user_contact.router, prefix="/api/user/contact", tags=["User Contact"])
-app.include_router(excel_import.router,prefix="/api/excel-import/",)
+app.include_router(excel_import.router,prefix="/api/excel-import",)
 
 
 # ===== WEBSOCKET ЭНДПОИНТ =====
