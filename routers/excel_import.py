@@ -38,12 +38,6 @@ async def import_students_from_excel(
         credentials: HTTPAuthorizationCredentials = Depends(security),
         db: Session = Depends(get_db)
 ):
-    """
-    Импорт студентов из Excel файла
-
-    Токен передается в заголовке: Authorization: Bearer <token>
-    Остальные параметры передаются как form-data
-    """
     try:
         # Получаем текущего пользователя по токену
         token = credentials.credentials
@@ -70,49 +64,41 @@ async def import_students_from_excel(
         if df.empty:
             raise HTTPException(status_code=400, detail="Excel файл пуст")
 
-        # Нормализуем названия колонок
-        df.columns = df.columns.str.strip().str.lower()
+        # Для проверки дубликатов создаем временный сервис и нормализуем колонки
+        temp_service = ExcelImportService(db, current_user.id)
+        df_normalized = temp_service._normalize_columns(df.copy())
 
-        # Проверяем наличие обязательной колонки с ID
-        if 'russian_student_id' not in df.columns and not any('id' in col and 'student' in col for col in df.columns):
-            return ExcelImportResponse(
-                success=False,
-                total_rows=len(df),
-                created_students=0,
-                updated_students=0,
-                created_applications=0,
-                errors=[{"row": 0, "error": "Отсутствует колонка с ID поступающего (russian_student_id)"}],
-                warnings=[],
-                message="Ошибка: в файле нет обязательных колонок"
-            )
+        # Получаем ID из нормализованного DataFrame для проверки дубликатов
+        if 'russian_student_id' in df_normalized.columns:
+            try:
+                # Пробуем получить ID как строки (для универсальности)
+                ids_from_file = []
+                for val in df_normalized['russian_student_id'].dropna():
+                    try:
+                        # Очищаем строку от нецифровых символов
+                        if isinstance(val, str):
+                            cleaned = ''.join(filter(str.isdigit, val))
+                            if cleaned:
+                                ids_from_file.append(int(cleaned))
+                        else:
+                            ids_from_file.append(int(float(val)))
+                    except (ValueError, TypeError):
+                        continue
 
-        # Получаем ID из файла
-        try:
-            ids_from_file = df['russian_student_id'].dropna().astype(str).unique().tolist()
-        except KeyError:
-            # Если колонка называется иначе, пробуем найти ее
-            id_col = next((col for col in df.columns if 'id' in col and 'student' in col), None)
-            if id_col:
-                ids_from_file = df[id_col].dropna().astype(str).unique().tolist()
-            else:
-                return ExcelImportResponse(
-                    success=False,
-                    total_rows=len(df),
-                    created_students=0,
-                    updated_students=0,
-                    created_applications=0,
-                    errors=[{"row": 0, "error": "Не удалось определить колонку с ID поступающего"}],
-                    warnings=[],
-                    message="Ошибка: не удалось определить колонку с ID"
-                )
+                ids_from_file = list(set(ids_from_file))  # Уникальные значения
 
-        # Проверяем существующих студентов
-        existing_students = db.query(Student).filter(Student.russian_student_id.in_(ids_from_file)).all()
+                # Проверяем существующих студентов
+                existing_students = db.query(Student).filter(Student.russian_student_id.in_(ids_from_file)).all()
 
-        duplicates_found = [
-            {"id": s.russian_student_id, "full_name": s.full_name}
-            for s in existing_students
-        ]
+                duplicates_found = [
+                    {"id": s.russian_student_id, "full_name": s.full_name}
+                    for s in existing_students
+                ]
+            except Exception as e:
+                # Если не удалось получить ID, продолжаем без проверки дубликатов
+                duplicates_found = []
+        else:
+            duplicates_found = []
 
         # Парсим replace_ids из JSON строки
         replace_ids_set = set()
@@ -135,6 +121,7 @@ async def import_students_from_excel(
                 errors=[
                     {"row": 0, "error": "Найдены дубликаты. Используйте стратегию замены или выберите игнорирование."}
                 ],
+                warnings=[],
                 message="Импорт прерван: найдены дубликаты.",
                 duplicates_found=duplicates_found
             )
@@ -162,11 +149,12 @@ async def import_students_from_excel(
                         "row": 0,
                         "error": f"Найдены дубликаты. Не все из них выбраны для замены. {', '.join(details)}"
                     }],
+                    warnings=[],
                     message="Импорт прерван: не все дубликаты выбраны для замены.",
                     duplicates_found=duplicates_found
                 )
 
-        # Запускаем импорт
+        # Запускаем импорт (вся логика нормализации и проверки внутри)
         import_service = ExcelImportService(db, current_user.id)
 
         result = await import_service.import_from_dataframe(
@@ -184,7 +172,8 @@ async def import_students_from_excel(
             created_applications=result['created_applications'],
             errors=result['errors'],
             warnings=result['warnings'],
-            message=result['message']
+            message=result['message'],
+            duplicates_found=duplicates_found if duplicates_found else None
         )
 
     except HTTPException:
