@@ -206,21 +206,21 @@ class ExcelImportService:
             'error': None
         }
 
-        # 1. ФИО (ОБЯЗАТЕЛЬНО)
-        full_name = self._get_value(row, 'full_name')
-        if not full_name:
+        # 1. ФИО (ОБЯЗАТЕЛЬНО) - используем .get() и проверяем на NaN
+        full_name = row.get('full_name')
+        if pd.isna(full_name) or not str(full_name).strip():
             result['error'] = "ФИО обязательно"
             return result
 
         # 2. Телефон (ОБЯЗАТЕЛЬНО)
-        phone_raw = self._get_value(row, 'phone')
-        if not phone_raw:
+        phone_raw = row.get('phone')
+        if pd.isna(phone_raw) or not str(phone_raw).strip():
             result['error'] = "Телефон обязателен"
             return result
 
         # 3. Russian Student ID (ОБЯЗАТЕЛЬНО)
-        russian_student_id_raw = self._get_value(row, 'russian_student_id')
-        if russian_student_id_raw is None:
+        russian_student_id_raw = row.get('russian_student_id')
+        if pd.isna(russian_student_id_raw):
             result['error'] = "ID поступающего обязателен"
             return result
 
@@ -240,8 +240,9 @@ class ExcelImportService:
             result['error'] = f"ID должен быть числом, получено: {russian_student_id_raw}"
             return result
 
-        email_raw = self._get_value(row, 'email')
-        email = str(email_raw).strip() if email_raw else None
+        # Email (опционально)
+        email_raw = row.get('email')
+        email = str(email_raw).strip() if not pd.isna(email_raw) else None
 
         # Логика обработки дубликатов
         existing_student = self.db.query(Student).filter(
@@ -317,8 +318,8 @@ class ExcelImportService:
             student_for_apps = new_student
 
         # Обработка заявления
-        profile_name_val = self._get_value(row, 'profile_name')
-        if profile_name_val and str(profile_name_val).strip():
+        profile_name_val = row.get('profile_name')
+        if not pd.isna(profile_name_val) and str(profile_name_val).strip():
             await self._process_application(
                 student=student_for_apps,
                 profile_name=str(profile_name_val).strip(),
@@ -363,17 +364,19 @@ class ExcelImportService:
             result['warnings'].append(f"Заявление на профиль '{profile_name}' уже существует")
             return
 
-        score_raw = self._get_value(row, 'score')
+        # Получаем баллы
+        score_raw = row.get('score')
         total_score = None
-        if score_raw is not None:
+        if not pd.isna(score_raw) and score_raw is not None:
             try:
                 total_score = int(float(score_raw))
             except (ValueError, TypeError):
                 result['warnings'].append(f"Не удалось распознать баллы: {score_raw}")
 
-        priority_raw = self._get_value(row, 'priority')
+        # Получаем приоритет
+        priority_raw = row.get('priority')
         priority_value = None
-        if priority_raw is not None:
+        if not pd.isna(priority_raw) and priority_raw is not None:
             try:
                 priority_value = int(float(priority_raw))
                 priority_value = max(1, min(10, priority_value))
@@ -412,8 +415,8 @@ class ExcelImportService:
 
     def _parse_study_form(self, row: pd.Series) -> Optional[StudyForm]:
         """Парсит форму обучения"""
-        value = self._get_value(row, 'study_form')
-        if not value:
+        value = row.get('study_form')
+        if pd.isna(value) or not value:
             return None
 
         str_value = str(value).strip().lower()
@@ -424,19 +427,14 @@ class ExcelImportService:
 
     def _parse_study_basis(self, row: pd.Series) -> Optional[StudyBasis]:
         """Парсит основу обучения"""
-        value = self._get_value(row, 'study_basis')
-        if not value:
+        value = row.get('study_basis')
+        if pd.isna(value) or not value:
             return None
 
         str_value = str(value).strip().lower()
         for key, basis in self.study_basis_mapping.items():
             if key in str_value or str_value in key:
                 return basis
-        return None
-
-    def _get_value(self, row: pd.Series, key: str) -> Any:
-        if key in row and pd.notna(row[key]):
-            return row[key]
         return None
 
     def _normalize_phone(self, phone: str) -> str:
