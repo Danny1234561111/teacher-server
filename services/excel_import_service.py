@@ -41,7 +41,6 @@ class ExcelImportService:
             'основа обучения': 'study_basis',
             'основа': 'study_basis',
             'вид мест': 'study_basis',
-            'id поступающего': 'russian_student_id',
             'russian_student_id': 'russian_student_id',
             'идентификатор': 'russian_student_id',
             'id студента': 'russian_student_id',
