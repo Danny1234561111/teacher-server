@@ -426,5 +426,4 @@ def _normalize_phone(self, phone: str) -> str:
 
     if len(digits) == 11 and digits.startswith('7'):
         return '+' + digits[1:]
-
     return phone

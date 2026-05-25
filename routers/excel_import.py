@@ -1,5 +1,5 @@
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Set
@@ -15,18 +15,6 @@ router = APIRouter()
 security = HTTPBearer()
 auth_service = AuthService()
 
-class ExcelImportRequest(BaseModel):
-    file: UploadFile = Field(..., description="Excel файл с данными абитуриентов")
-    create_missing_profiles: bool = Field(False, description="Создавать ли отсутствующие профили")
-    duplicate_strategy: str = Field(
-        default="skip",
-        description="Стратегия обработки дубликатов: 'skip', 'replace_all', 'replace_selected'"
-    )
-    replace_ids: Optional[List[int]] = Field(
-        None,
-        description="Список ID поступающих для замены (требуется при duplicate_strategy='replace_selected')"
-    )
-
 
 class ExcelImportResponse(BaseModel):
     success: bool
@@ -40,15 +28,30 @@ class ExcelImportResponse(BaseModel):
     duplicates_found: Optional[List[Dict[str, Any]]] = None
 
 
-
 @router.post("/excel-import/upload", response_model=ExcelImportResponse)
 async def import_students_from_excel(
-        request: ExcelImportRequest,
-        current_user: User = Depends(get_current_user),  # Используем вашу функцию авторизации
+        file: UploadFile = File(..., description="Excel файл с данными абитуриентов"),
+        create_missing_profiles: bool = Form(False, description="Создавать ли отсутствующие профили"),
+        duplicate_strategy: str = Form("skip",
+                                       description="Стратегия обработки дубликатов: 'skip', 'replace_all', 'replace_selected'"),
+        replace_ids: Optional[str] = Form(None, description="JSON строка со списком ID для замены"),
+        credentials: HTTPAuthorizationCredentials = Depends(security),
         db: Session = Depends(get_db)
 ):
+    """
+    Импорт студентов из Excel файла
+
+    Токен передается в заголовке: Authorization: Bearer <token>
+    Остальные параметры передаются как form-data
+    """
     try:
-        file = request.file
+        # Получаем текущего пользователя по токену
+        token = credentials.credentials
+        user_data = auth_service.get_user_by_token(token, db)
+        current_user = db.query(User).filter(User.id == user_data['id']).first()
+
+        if not current_user:
+            raise HTTPException(status_code=401, detail="Пользователь не найден")
 
         # Проверка формата файла
         if not file.filename.endswith(('.xlsx', '.xls')):
@@ -66,7 +69,11 @@ async def import_students_from_excel(
 
         if df.empty:
             raise HTTPException(status_code=400, detail="Excel файл пуст")
+
+        # Нормализуем названия колонок
         df.columns = df.columns.str.strip().str.lower()
+
+        # Проверяем наличие обязательной колонки с ID
         if 'russian_student_id' not in df.columns and not any('id' in col and 'student' in col for col in df.columns):
             return ExcelImportResponse(
                 success=False,
@@ -78,10 +85,12 @@ async def import_students_from_excel(
                 warnings=[],
                 message="Ошибка: в файле нет обязательных колонок"
             )
+
+        # Получаем ID из файла
         try:
             ids_from_file = df['russian_student_id'].dropna().astype(str).unique().tolist()
         except KeyError:
-            # Если колонка называется иначе, пробуем найти ее и извлечь значения
+            # Если колонка называется иначе, пробуем найти ее
             id_col = next((col for col in df.columns if 'id' in col and 'student' in col), None)
             if id_col:
                 ids_from_file = df[id_col].dropna().astype(str).unique().tolist()
@@ -96,6 +105,8 @@ async def import_students_from_excel(
                     warnings=[],
                     message="Ошибка: не удалось определить колонку с ID"
                 )
+
+        # Проверяем существующих студентов
         existing_students = db.query(Student).filter(Student.russian_student_id.in_(ids_from_file)).all()
 
         duplicates_found = [
@@ -103,8 +114,18 @@ async def import_students_from_excel(
             for s in existing_students
         ]
 
+        # Парсим replace_ids из JSON строки
+        replace_ids_set = set()
+        if replace_ids:
+            import json
+            try:
+                replace_ids_list = json.loads(replace_ids)
+                replace_ids_set = set(replace_ids_list)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Неверный формат replace_ids. Ожидается JSON массив.")
+
         # Стратегия SKIP: возвращаем ошибку со списком дублей
-        if request.duplicate_strategy == "skip" and duplicates_found:
+        if duplicate_strategy == "skip" and duplicates_found:
             return ExcelImportResponse(
                 success=False,
                 total_rows=len(df),
@@ -112,19 +133,22 @@ async def import_students_from_excel(
                 updated_students=0,
                 created_applications=0,
                 errors=[
-                    {"row": 0, "error": "Найдены дубликаты. Используйте стратегию замены или выберите игнорирование."}],
+                    {"row": 0, "error": "Найдены дубликаты. Используйте стратегию замены или выберите игнорирование."}
+                ],
                 message="Импорт прерван: найдены дубликаты.",
                 duplicates_found=duplicates_found
             )
 
         # Стратегия REPLACE_SELECTED: проверяем список ID на замену
-        if request.duplicate_strategy == "replace_selected":
-            if not request.replace_ids:
-                raise HTTPException(status_code=400,
-                                    detail="Для стратегии 'replace_selected' необходимо указать список replace_ids")
+        if duplicate_strategy == "replace_selected":
+            if not replace_ids_set:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Для стратегии 'replace_selected' необходимо указать список replace_ids"
+                )
 
             ids_of_duplicates_in_file = [s.russian_student_id for s in existing_students]
-            not_allowed_to_replace = set(ids_of_duplicates_in_file) - set(request.replace_ids)
+            not_allowed_to_replace = set(ids_of_duplicates_in_file) - replace_ids_set
 
             if not_allowed_to_replace:
                 details = [f"ID {id_}" for id_ in not_allowed_to_replace]
@@ -134,18 +158,22 @@ async def import_students_from_excel(
                     created_students=0,
                     updated_students=0,
                     created_applications=0,
-                    errors=[{"row": 0,
-                             "error": f"Найдены дубликаты. Не все из них выбраны для замены. {', '.join(details)}"}],
+                    errors=[{
+                        "row": 0,
+                        "error": f"Найдены дубликаты. Не все из них выбраны для замены. {', '.join(details)}"
+                    }],
                     message="Импорт прерван: не все дубликаты выбраны для замены.",
                     duplicates_found=duplicates_found
                 )
+
+        # Запускаем импорт
         import_service = ExcelImportService(db, current_user.id)
 
         result = await import_service.import_from_dataframe(
             df=df,
-            create_missing_profiles=request.create_missing_profiles,
-            duplicate_strategy=request.duplicate_strategy,
-            replace_ids=set(request.replace_ids) if request.replace_ids else set()
+            create_missing_profiles=create_missing_profiles,
+            duplicate_strategy=duplicate_strategy,
+            replace_ids=replace_ids_set
         )
 
         return ExcelImportResponse(
@@ -160,6 +188,6 @@ async def import_students_from_excel(
         )
 
     except HTTPException:
-        raise  # Пробрасываем HTTP-ошибки дальше
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Внутренняя ошибка сервера при импорте: {str(e)}")
