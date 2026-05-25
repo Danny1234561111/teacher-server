@@ -45,6 +45,8 @@ class ExcelImportService:
             'russian_student_id': 'russian_student_id',
             'идентификатор': 'russian_student_id',
             'id студента': 'russian_student_id',
+            'уникальный код поступающего': 'russian_student_id',  # ← ДОБАВИТЬ ЭТУ СТРОКУ
+            'уникальный код': 'russian_student_id',  # ← И ЭТУ НА ВСЯКИЙ СЛУЧАЙ
             'почта': 'email',
             'email': 'email'
         }
