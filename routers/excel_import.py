@@ -28,7 +28,7 @@ class ExcelImportResponse(BaseModel):
     duplicates_found: Optional[List[Dict[str, Any]]] = None
 
 
-@router.post("/excel-import/upload", response_model=ExcelImportResponse)
+@router.post("/upload", response_model=ExcelImportResponse)
 async def import_students_from_excel(
         file: UploadFile = File(..., description="Excel файл с данными абитуриентов"),
         create_missing_profiles: bool = Form(False, description="Создавать ли отсутствующие профили"),
