@@ -78,6 +78,39 @@ class ExcelImportService:
             'целевые места': StudyBasis.TARGET,
         }
 
+    def _normalize_full_name(self, full_name: str) -> str:
+        """
+        Нормализует ФИО:
+        - Удаляет символы * и другие спецсимволы
+        - Приводит к нижнему регистру
+        - Делает первую букву каждого слова заглавной
+        """
+        if not full_name or not isinstance(full_name, str):
+            return ""
+
+        # Удаляем символы * и другие нежелательные символы (оставляем буквы, пробелы, дефисы)
+        cleaned = re.sub(r'[^\w\s\-\.]', '', full_name)
+
+        # Убираем лишние пробелы
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+        # Разбиваем на слова (Фамилия, Имя, Отчество)
+        words = cleaned.split()
+
+        # Приводим каждое слово к формату: первая буква заглавная, остальные строчные
+        normalized_words = []
+        for word in words:
+            if word:
+                # Если слово содержит дефис (например, Салтыков-Щедрин)
+                if '-' in word:
+                    parts = word.split('-')
+                    normalized_parts = [p[0].upper() + p[1:].lower() if p else p for p in parts]
+                    normalized_words.append('-'.join(normalized_parts))
+                else:
+                    normalized_words.append(word[0].upper() + word[1:].lower())
+
+        return ' '.join(normalized_words)
+
     async def import_from_dataframe(
             self,
             df: pd.DataFrame,
@@ -151,12 +184,9 @@ class ExcelImportService:
             })
 
         # ========== ЛОГИКА ОБРАБОТКИ ДУБЛИКАТОВ ==========
-        # При стратегии SKIP - просто продолжаем, дубликаты будут пропущены в _process_row_dict
         if duplicate_strategy == 'skip':
-            # Не возвращаем ошибку, просто продолжаем импорт
             pass
         elif duplicate_strategy == 'replace_selected' and not replace_ids:
-            # Ошибка: выбрана замена выбранных, но не указаны ID
             return {
                 'success': False,
                 'total_rows': len(df),
@@ -168,9 +198,8 @@ class ExcelImportService:
                 'message': "Импорт прерван: не указаны ID для замены",
                 'duplicates_found': duplicates_found
             }
-        # Для replace_all и replace_selected (с ID) - продолжаем обработку
 
-        # ========== ОБРАБОТКА СТРОК С УЧЕТОМ СТРАТЕГИИ ==========
+        # ========== ОБРАБОТКА СТРОК ==========
         created_students = 0
         updated_students = 0
         created_applications = 0
@@ -208,7 +237,6 @@ class ExcelImportService:
         else:
             self.db.rollback()
 
-        # Формируем сообщение
         if duplicate_strategy == 'skip' and duplicates_found:
             message = f"Импорт завершен. Пропущено дубликатов: {len(duplicates_found)}. Создано: {created_students}, Обновлено: {updated_students}, Заявлений: {created_applications}"
         else:
@@ -256,7 +284,7 @@ class ExcelImportService:
         }
 
         # Безопасно получаем значения из словаря
-        full_name = row_dict.get('full_name')
+        full_name_raw = row_dict.get('full_name')
         phone_raw = row_dict.get('phone')
         russian_student_id_raw = row_dict.get('russian_student_id')
         email_raw = row_dict.get('email')
@@ -267,7 +295,7 @@ class ExcelImportService:
         study_basis_val = row_dict.get('study_basis')
 
         # Проверяем NaN
-        if pd.isna(full_name) or not full_name or not str(full_name).strip():
+        if pd.isna(full_name_raw) or not full_name_raw or not str(full_name_raw).strip():
             result['error'] = "ФИО обязательно"
             return result
 
@@ -294,10 +322,16 @@ class ExcelImportService:
             result['error'] = f"ID должен быть числом, получено: {russian_student_id_raw}"
             return result
 
+        # Нормализуем ФИО (удаляем *, приводим к правильному регистру)
+        normalized_full_name = self._normalize_full_name(str(full_name_raw).strip())
+
         # Email
         email = None
         if email_raw and not pd.isna(email_raw):
             email = str(email_raw).strip()
+
+        # Нормализуем телефон
+        normalized_phone = self._normalize_phone(str(phone_raw))
 
         # Проверка на дубликаты
         existing_student = self.db.query(Student).filter(
@@ -305,32 +339,37 @@ class ExcelImportService:
         ).first()
 
         if existing_student:
-            # При стратегии skip - пропускаем дубликат
             if duplicate_strategy == 'skip':
                 result['error'] = f"Дубликат ID {russian_student_id}. Строка пропущена."
                 return result
 
-            # При стратегии replace_selected - проверяем, выбран ли этот ID
             if duplicate_strategy == 'replace_selected':
                 if russian_student_id not in replace_ids:
                     result['error'] = f"Дубликат ID {russian_student_id} не выбран для замены. Строка пропущена."
                     return result
 
-            # Обновление существующего (для replace_all или replace_selected с выбранным ID)
+            # Обновление существующего студента
             result['updated'] = True
-            existing_student.full_name = str(full_name).strip()
-            existing_student.phone = self._normalize_phone(str(phone_raw))
 
+            # Обновляем ФИО (нормализованное)
+            existing_student.full_name = normalized_full_name
+
+            # Обновляем телефон
+            existing_student.phone = normalized_phone
+
+            # Обновляем email
             if email:
                 additional_contacts = existing_student.additional_contacts or {}
                 additional_contacts['email'] = email
                 existing_student.additional_contacts = additional_contacts
 
+            # Обновляем форму обучения
             if study_form_val and not pd.isna(study_form_val):
                 parsed_form = self._parse_study_form(str(study_form_val))
                 if parsed_form:
                     existing_student.study_form = parsed_form
 
+            # Обновляем основу обучения
             if study_basis_val and not pd.isna(study_basis_val):
                 parsed_basis = self._parse_study_basis(str(study_basis_val))
                 if parsed_basis:
@@ -341,7 +380,7 @@ class ExcelImportService:
             student_for_apps = existing_student
 
         else:
-            # Создание нового
+            # Создание нового студента
             result['created'] = True
 
             study_form_parsed = None
@@ -358,8 +397,8 @@ class ExcelImportService:
 
             new_student = Student(
                 russian_student_id=russian_student_id,
-                full_name=str(full_name).strip(),
-                phone=self._normalize_phone(str(phone_raw)),
+                full_name=normalized_full_name,
+                phone=normalized_phone,
                 additional_contacts=additional_contacts if additional_contacts else None,
                 study_form=study_form_parsed,
                 study_basis=study_basis_parsed,

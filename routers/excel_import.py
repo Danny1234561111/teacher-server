@@ -2,16 +2,17 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 from io import BytesIO
 from sqlalchemy.orm import Session
+import json
 
 from database.database import get_db
 from database.schema import User
 from services.excel_import_service import ExcelImportService
 from services.auth_service import AuthService
 
-router = APIRouter(tags=["Excel Import"])
+router = APIRouter(prefix="/excel-import", tags=["Excel Import"])
 security = HTTPBearer()
 auth_service = AuthService()
 
@@ -65,14 +66,13 @@ async def import_students_from_excel(
         # Парсим replace_ids
         replace_ids_set = set()
         if replace_ids:
-            import json
             try:
                 replace_ids_list = json.loads(replace_ids)
                 replace_ids_set = set(replace_ids_list)
             except json.JSONDecodeError:
                 raise HTTPException(status_code=400, detail="Неверный формат replace_ids")
 
-        # Создаем сервис и импортируем данные (ВСЯ ЛОГИКА ВНУТРИ)
+        # Создаем сервис и импортируем данные
         import_service = ExcelImportService(db, current_user.id)
 
         result = await import_service.import_from_dataframe(
