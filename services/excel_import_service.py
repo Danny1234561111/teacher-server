@@ -15,7 +15,7 @@ def normalize_full_name(full_name: str) -> str:
     if not full_name or not isinstance(full_name, str):
         return ""
 
-    # Удаляем символы * и другие нежелательные символы
+    # Удаляем символы *
     cleaned = re.sub(r'[*]', '', full_name)
 
     # Убираем лишние пробелы
@@ -27,11 +27,10 @@ def normalize_full_name(full_name: str) -> str:
     # Разбиваем на слова
     words = cleaned.split()
 
-    # Приводим каждое слово к формату: первая буква заглавная, остальные строчные
+    # Приводим каждое слово к формату
     normalized_words = []
     for word in words:
         if word:
-            # Если слово содержит дефис (например, Салтыков-Щедрин)
             if '-' in word:
                 parts = word.split('-')
                 normalized_parts = [p[0].upper() + p[1:].lower() if p else p for p in parts]
@@ -144,7 +143,41 @@ class ExcelImportService:
         # Преобразуем DataFrame в список словарей
         records = df.to_dict(orient='records')
 
-        # Собираем ID для проверки дубликатов
+        # ========== УДАЛЯЕМ ДУБЛИКАТЫ ВНУТРИ ФАЙЛА ==========
+        # Оставляем только первое вхождение каждого ID
+        seen_ids = set()
+        unique_records = []
+        duplicate_ids_in_file = set()
+
+        for row_dict in records:
+            russian_student_id_raw = row_dict.get('russian_student_id')
+            if pd.isna(russian_student_id_raw) or russian_student_id_raw is None:
+                unique_records.append(row_dict)
+                continue
+
+            try:
+                if isinstance(russian_student_id_raw, str):
+                    cleaned = re.sub(r'[^\d]', '', russian_student_id_raw)
+                    student_id = int(cleaned) if cleaned else None
+                else:
+                    student_id = int(float(russian_student_id_raw))
+
+                if student_id and student_id > 0:
+                    if student_id in seen_ids:
+                        duplicate_ids_in_file.add(student_id)
+                        continue  # Пропускаем дубликат в файле
+                    else:
+                        seen_ids.add(student_id)
+                        unique_records.append(row_dict)
+                else:
+                    unique_records.append(row_dict)
+            except (ValueError, TypeError):
+                unique_records.append(row_dict)
+
+        # Сохраняем только уникальные записи
+        records = unique_records
+
+        # ========== ПРОВЕРКА ДУБЛИКАТОВ В БД ==========
         all_ids = []
         for row_dict in records:
             russian_student_id_raw = row_dict.get('russian_student_id')
@@ -166,22 +199,24 @@ class ExcelImportService:
             Student.russian_student_id.in_(set(all_ids))
         ).all()
 
-        duplicates_found = [
-            {"id": s.russian_student_id, "full_name": s.full_name}
-            for s in existing_students
-        ]
+        existing_ids = {s.russian_student_id for s in existing_students}
 
-        # Если стратегия skip и есть дубликаты - возвращаем список дубликатов
-        if duplicate_strategy == 'skip' and duplicates_found:
+        # ========== ЛОГИКА ОБРАБОТКИ ==========
+        # Если стратегия skip и есть дубликаты в БД - возвращаем список для выбора
+        if duplicate_strategy == 'skip' and existing_ids:
+            duplicates_found = [
+                {"id": s.russian_student_id, "full_name": s.full_name}
+                for s in existing_students
+            ]
             return {
                 'success': False,
                 'total_rows': len(df),
                 'created_students': 0,
                 'updated_students': 0,
                 'created_applications': 0,
-                'errors': [{"row": 0, "error": f"Найдено {len(duplicates_found)} дубликатов"}],
+                'errors': [{"row": 0, "error": f"Найдено {len(existing_ids)} дубликатов в БД"}],
                 'warnings': [],
-                'message': "Обнаружены дубликаты",
+                'message': "Обнаружены дубликаты в системе",
                 'duplicates_found': duplicates_found
             }
 
@@ -190,6 +225,11 @@ class ExcelImportService:
         created_applications = 0
         errors = []
         warnings = []
+
+        # Добавляем предупреждение о дубликатах в файле
+        if duplicate_ids_in_file:
+            warnings.append({"row": 0,
+                             "warning": f"Пропущено {len(duplicate_ids_in_file)} дубликатов внутри файла (оставлено первое вхождение)"})
 
         for idx, row_dict in enumerate(records):
             row_num = idx + 2
@@ -200,7 +240,8 @@ class ExcelImportService:
                     row_num=row_num,
                     create_missing_profiles=create_missing_profiles,
                     duplicate_strategy=duplicate_strategy,
-                    replace_ids=replace_ids
+                    replace_ids=replace_ids,
+                    existing_ids=existing_ids
                 )
 
                 if result.get('error'):
@@ -251,7 +292,8 @@ class ExcelImportService:
             row_num: int,
             create_missing_profiles: bool,
             duplicate_strategy: str,
-            replace_ids: Set[int]
+            replace_ids: Set[int],
+            existing_ids: Set[int]
     ) -> Dict[str, Any]:
         """Обрабатывает одну строку из словаря"""
 
@@ -311,7 +353,7 @@ class ExcelImportService:
         normalized_full_name = normalize_full_name(str(full_name_raw).strip())
         normalized_phone = self._normalize_phone(str(phone_raw))
 
-        # Проверка существующего студента
+        # Проверка существующего студента в БД
         existing_student = self.db.query(Student).filter(
             Student.russian_student_id == russian_student_id
         ).first()
@@ -319,7 +361,7 @@ class ExcelImportService:
         if existing_student:
             # При стратегии skip - пропускаем
             if duplicate_strategy == 'skip':
-                result['error'] = f"Дубликат ID {russian_student_id}. Строка пропущена."
+                result['error'] = f"Дубликат ID {russian_student_id} (уже есть в системе). Строка пропущена."
                 return result
 
             # При стратегии replace_selected - проверяем, выбран ли этот ID
@@ -412,10 +454,8 @@ class ExcelImportService:
     ):
         """Обрабатывает заявление из словаря"""
 
-        # Очищаем название профиля (берем первую часть до ";")
         clean_profile_name = profile_name.split(';')[0].strip()
 
-        # Поиск профиля
         profile = self.db.query(Profile).filter(
             Profile.name.ilike(f"%{clean_profile_name}%")
         ).first()
@@ -429,7 +469,6 @@ class ExcelImportService:
             result['warnings'].append(f"Не найден профиль '{clean_profile_name}'")
             return
 
-        # Проверка существующего заявления
         existing_application = self.db.query(StudentApplication).filter(
             StudentApplication.student_id == student.id,
             StudentApplication.profile_id == profile.id
@@ -439,7 +478,6 @@ class ExcelImportService:
             result['warnings'].append(f"Заявление на профиль '{clean_profile_name}' уже существует")
             return
 
-        # Парсим баллы
         total_score = None
         if score_raw and not pd.isna(score_raw):
             try:
@@ -447,7 +485,6 @@ class ExcelImportService:
             except (ValueError, TypeError):
                 result['warnings'].append(f"Не удалось распознать баллы: {score_raw}")
 
-        # Парсим приоритет
         priority_value = 1
         if priority_raw and not pd.isna(priority_raw):
             try:
@@ -456,7 +493,6 @@ class ExcelImportService:
             except (ValueError, TypeError):
                 pass
 
-        # Форма и основа обучения
         study_form_for_apps = None
         if study_form_val and not pd.isna(study_form_val):
             study_form_for_apps = self._parse_study_form(str(study_form_val))
@@ -469,7 +505,6 @@ class ExcelImportService:
         if not study_basis_for_apps:
             study_basis_for_apps = student.study_basis
 
-        # Создаем заявление
         application = StudentApplication(
             student_id=student.id,
             department_id=profile.speciality.department_id if profile.speciality else None,
