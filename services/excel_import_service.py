@@ -6,8 +6,7 @@ import re
 
 from database.schema import (
     Student, StudentApplication, Profile,
-    StudentStatus, StudyForm, StudyBasis, ApplicationStatus,
-    MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus
+    StudentStatus, StudyForm, StudyBasis, ApplicationStatus
 )
 
 
@@ -16,7 +15,7 @@ def normalize_full_name(full_name: str) -> str:
     if not full_name or not isinstance(full_name, str):
         return ""
 
-    # Удаляем символы *
+    # Удаляем символы * и другие нежелательные символы
     cleaned = re.sub(r'[*]', '', full_name)
 
     # Убираем лишние пробелы
@@ -28,10 +27,11 @@ def normalize_full_name(full_name: str) -> str:
     # Разбиваем на слова
     words = cleaned.split()
 
-    # Приводим каждое слово к формату
+    # Приводим каждое слово к формату: первая буква заглавная, остальные строчные
     normalized_words = []
     for word in words:
         if word:
+            # Если слово содержит дефис (например, Салтыков-Щедрин)
             if '-' in word:
                 parts = word.split('-')
                 normalized_parts = [p[0].upper() + p[1:].lower() if p else p for p in parts]
@@ -307,9 +307,9 @@ class ExcelImportService:
         if email_raw and not pd.isna(email_raw):
             email = str(email_raw).strip()
 
-        # Нормализуем телефон и ФИО
-        normalized_phone = self._normalize_phone(str(phone_raw))
+        # Нормализуем ФИО и телефон
         normalized_full_name = normalize_full_name(str(full_name_raw).strip())
+        normalized_phone = self._normalize_phone(str(phone_raw))
 
         # Проверка существующего студента
         existing_student = self.db.query(Student).filter(
@@ -317,15 +317,18 @@ class ExcelImportService:
         ).first()
 
         if existing_student:
+            # При стратегии skip - пропускаем
             if duplicate_strategy == 'skip':
                 result['error'] = f"Дубликат ID {russian_student_id}. Строка пропущена."
                 return result
-            elif duplicate_strategy == 'replace_selected':
+
+            # При стратегии replace_selected - проверяем, выбран ли этот ID
+            if duplicate_strategy == 'replace_selected':
                 if russian_student_id not in replace_ids:
                     result['error'] = f"Дубликат ID {russian_student_id} не выбран для замены. Строка пропущена."
                     return result
 
-            # Обновление
+            # Обновляем существующего студента
             result['updated'] = True
             existing_student.full_name = normalized_full_name
             existing_student.phone = normalized_phone
@@ -350,7 +353,7 @@ class ExcelImportService:
             student_for_apps = existing_student
 
         else:
-            # Создание нового студента
+            # Создаем нового студента
             result['created'] = True
 
             study_form_parsed = None
@@ -374,10 +377,6 @@ class ExcelImportService:
                 study_basis=study_basis_parsed,
                 status=StudentStatus.ACTIVE,
                 kurator_id=self.user_id,
-                meeting_status=MeetingStatus.UNKNOWN,
-                call_status=CallStatus.UNKNOWN,
-                decision_status=DecisionStatus.UNKNOWN,
-                documents_status=DocumentsStatus.UNKNOWN,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
@@ -413,8 +412,10 @@ class ExcelImportService:
     ):
         """Обрабатывает заявление из словаря"""
 
+        # Очищаем название профиля (берем первую часть до ";")
         clean_profile_name = profile_name.split(';')[0].strip()
 
+        # Поиск профиля
         profile = self.db.query(Profile).filter(
             Profile.name.ilike(f"%{clean_profile_name}%")
         ).first()
@@ -428,6 +429,7 @@ class ExcelImportService:
             result['warnings'].append(f"Не найден профиль '{clean_profile_name}'")
             return
 
+        # Проверка существующего заявления
         existing_application = self.db.query(StudentApplication).filter(
             StudentApplication.student_id == student.id,
             StudentApplication.profile_id == profile.id
@@ -437,6 +439,7 @@ class ExcelImportService:
             result['warnings'].append(f"Заявление на профиль '{clean_profile_name}' уже существует")
             return
 
+        # Парсим баллы
         total_score = None
         if score_raw and not pd.isna(score_raw):
             try:
@@ -444,6 +447,7 @@ class ExcelImportService:
             except (ValueError, TypeError):
                 result['warnings'].append(f"Не удалось распознать баллы: {score_raw}")
 
+        # Парсим приоритет
         priority_value = 1
         if priority_raw and not pd.isna(priority_raw):
             try:
@@ -452,6 +456,7 @@ class ExcelImportService:
             except (ValueError, TypeError):
                 pass
 
+        # Форма и основа обучения
         study_form_for_apps = None
         if study_form_val and not pd.isna(study_form_val):
             study_form_for_apps = self._parse_study_form(str(study_form_val))
@@ -464,6 +469,7 @@ class ExcelImportService:
         if not study_basis_for_apps:
             study_basis_for_apps = student.study_basis
 
+        # Создаем заявление
         application = StudentApplication(
             student_id=student.id,
             department_id=profile.speciality.department_id if profile.speciality else None,
