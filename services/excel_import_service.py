@@ -15,19 +15,13 @@ def normalize_full_name(full_name: str) -> str:
     if not full_name or not isinstance(full_name, str):
         return ""
 
-    # Удаляем символы *
     cleaned = re.sub(r'[*]', '', full_name)
-
-    # Убираем лишние пробелы
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
 
     if not cleaned:
         return ""
 
-    # Разбиваем на слова
     words = cleaned.split()
-
-    # Приводим каждое слово к формату
     normalized_words = []
     for word in words:
         if word:
@@ -140,11 +134,9 @@ class ExcelImportService:
                 'duplicates_found': None
             }
 
-        # Преобразуем DataFrame в список словарей
         records = df.to_dict(orient='records')
 
-        # ========== УДАЛЯЕМ ДУБЛИКАТЫ ВНУТРИ ФАЙЛА ==========
-        # Оставляем только первое вхождение каждого ID
+        # Удаляем дубликаты внутри файла (оставляем только первое вхождение каждого ID)
         seen_ids = set()
         unique_records = []
         duplicate_ids_in_file = set()
@@ -165,7 +157,7 @@ class ExcelImportService:
                 if student_id and student_id > 0:
                     if student_id in seen_ids:
                         duplicate_ids_in_file.add(student_id)
-                        continue  # Пропускаем дубликат в файле
+                        continue
                     else:
                         seen_ids.add(student_id)
                         unique_records.append(row_dict)
@@ -174,10 +166,9 @@ class ExcelImportService:
             except (ValueError, TypeError):
                 unique_records.append(row_dict)
 
-        # Сохраняем только уникальные записи
         records = unique_records
 
-        # ========== ПРОВЕРКА ДУБЛИКАТОВ В БД ==========
+        # Проверка дубликатов в БД
         all_ids = []
         for row_dict in records:
             russian_student_id_raw = row_dict.get('russian_student_id')
@@ -194,14 +185,12 @@ class ExcelImportService:
             except (ValueError, TypeError):
                 continue
 
-        # Находим дубликаты в БД
         existing_students = self.db.query(Student).filter(
             Student.russian_student_id.in_(set(all_ids))
         ).all()
 
         existing_ids = {s.russian_student_id for s in existing_students}
 
-        # ========== ЛОГИКА ОБРАБОТКИ ==========
         # Если стратегия skip и есть дубликаты в БД - возвращаем список для выбора
         if duplicate_strategy == 'skip' and existing_ids:
             duplicates_found = [
@@ -226,10 +215,8 @@ class ExcelImportService:
         errors = []
         warnings = []
 
-        # Добавляем предупреждение о дубликатах в файле
         if duplicate_ids_in_file:
-            warnings.append({"row": 0,
-                             "warning": f"Пропущено {len(duplicate_ids_in_file)} дубликатов внутри файла (оставлено первое вхождение)"})
+            warnings.append({"row": 0, "warning": f"Пропущено {len(duplicate_ids_in_file)} дубликатов внутри файла"})
 
         for idx, row_dict in enumerate(records):
             row_num = idx + 2
@@ -240,8 +227,7 @@ class ExcelImportService:
                     row_num=row_num,
                     create_missing_profiles=create_missing_profiles,
                     duplicate_strategy=duplicate_strategy,
-                    replace_ids=replace_ids,
-                    existing_ids=existing_ids
+                    replace_ids=replace_ids
                 )
 
                 if result.get('error'):
@@ -276,7 +262,6 @@ class ExcelImportService:
         }
 
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Нормализует названия колонок"""
         df.columns = df.columns.str.strip().str.lower()
         rename_dict = {}
         for col in df.columns:
@@ -292,11 +277,8 @@ class ExcelImportService:
             row_num: int,
             create_missing_profiles: bool,
             duplicate_strategy: str,
-            replace_ids: Set[int],
-            existing_ids: Set[int]
+            replace_ids: Set[int]
     ) -> Dict[str, Any]:
-        """Обрабатывает одну строку из словаря"""
-
         result = {
             'created': False,
             'updated': False,
@@ -316,7 +298,6 @@ class ExcelImportService:
         study_form_val = row_dict.get('study_form')
         study_basis_val = row_dict.get('study_basis')
 
-        # Проверка обязательных полей
         if pd.isna(full_name_raw) or not full_name_raw or not str(full_name_raw).strip():
             result['error'] = "ФИО обязательно"
             return result
@@ -329,7 +310,6 @@ class ExcelImportService:
             result['error'] = "ID поступающего обязателен"
             return result
 
-        # Парсим ID
         try:
             if isinstance(russian_student_id_raw, str):
                 cleaned = re.sub(r'[^\d]', '', russian_student_id_raw)
@@ -344,24 +324,22 @@ class ExcelImportService:
             result['error'] = f"ID должен быть числом, получено: {russian_student_id_raw}"
             return result
 
-        # Email
         email = None
         if email_raw and not pd.isna(email_raw):
             email = str(email_raw).strip()
 
-        # Нормализуем ФИО и телефон
         normalized_full_name = normalize_full_name(str(full_name_raw).strip())
         normalized_phone = self._normalize_phone(str(phone_raw))
 
-        # Проверка существующего студента в БД
+        # Проверяем существование в БД
         existing_student = self.db.query(Student).filter(
             Student.russian_student_id == russian_student_id
         ).first()
 
         if existing_student:
-            # При стратегии skip - пропускаем
+            # При стратегии skip - пропускаем все дубликаты
             if duplicate_strategy == 'skip':
-                result['error'] = f"Дубликат ID {russian_student_id} (уже есть в системе). Строка пропущена."
+                result['error'] = f"Дубликат ID {russian_student_id}. Строка пропущена."
                 return result
 
             # При стратегии replace_selected - проверяем, выбран ли этот ID
@@ -369,9 +347,12 @@ class ExcelImportService:
                 if russian_student_id not in replace_ids:
                     result['error'] = f"Дубликат ID {russian_student_id} не выбран для замены. Строка пропущена."
                     return result
+                # Если ID выбран - обновляем (продолжаем выполнение)
 
-            # Обновляем существующего студента
+            # Для replace_all И для replace_selected с выбранным ID - ОБНОВЛЯЕМ
             result['updated'] = True
+
+            # Обновляем все поля
             existing_student.full_name = normalized_full_name
             existing_student.phone = normalized_phone
 
@@ -395,7 +376,7 @@ class ExcelImportService:
             student_for_apps = existing_student
 
         else:
-            # Создаем нового студента
+            # Создание нового
             result['created'] = True
 
             study_form_parsed = None
@@ -452,8 +433,6 @@ class ExcelImportService:
             create_missing_profiles: bool,
             result: Dict[str, Any]
     ):
-        """Обрабатывает заявление из словаря"""
-
         clean_profile_name = profile_name.split(';')[0].strip()
 
         profile = self.db.query(Profile).filter(
