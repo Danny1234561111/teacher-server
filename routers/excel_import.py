@@ -12,7 +12,7 @@ from database.schema import User
 from services.excel_import_service import ExcelImportService
 from services.auth_service import AuthService
 
-router = APIRouter(prefix="/excel-import", tags=["Excel Import"])
+router = APIRouter(tags=["Excel Import"])
 security = HTTPBearer()
 auth_service = AuthService()
 
