@@ -191,7 +191,8 @@ class ExcelImportService:
 
         existing_ids = {s.russian_student_id for s in existing_students}
 
-        # Если стратегия skip и есть дубликаты в БД - возвращаем список для выбора
+        # Логика обработки дубликатов ПРИ ПЕРВОМ ЗАПРОСЕ (skip)
+        # Если стратегия skip и есть дубликаты - возвращаем их список для выбора
         if duplicate_strategy == 'skip' and existing_ids:
             duplicates_found = [
                 {"id": s.russian_student_id, "full_name": s.full_name}
@@ -208,6 +209,22 @@ class ExcelImportService:
                 'message': "Обнаружены дубликаты в системе",
                 'duplicates_found': duplicates_found
             }
+
+        # Для replace_selected - фильтруем, какие дубликаты нужно обработать
+        # Создаем множество ID, которые НЕ нужно обрабатывать (пропускаем)
+        ids_to_skip = set()
+        if duplicate_strategy == 'replace_selected':
+            # ID, которые есть в БД, но НЕ выбраны для замены - их пропускаем
+            ids_to_skip = existing_ids - replace_ids
+            # Если после вычитания остались ID, которые нужно пропустить, логируем
+            if ids_to_skip:
+                print(f"Будут пропущены дубликаты ID: {ids_to_skip}")
+        elif duplicate_strategy == 'replace_all':
+            # Все дубликаты будут обновлены, ничего не пропускаем
+            ids_to_skip = set()
+        elif duplicate_strategy == 'skip':
+            # Все дубликаты пропускаем
+            ids_to_skip = existing_ids
 
         created_students = 0
         updated_students = 0
@@ -226,8 +243,7 @@ class ExcelImportService:
                     row_dict=row_dict,
                     row_num=row_num,
                     create_missing_profiles=create_missing_profiles,
-                    duplicate_strategy=duplicate_strategy,
-                    replace_ids=replace_ids
+                    ids_to_skip=ids_to_skip
                 )
 
                 if result.get('error'):
@@ -276,8 +292,7 @@ class ExcelImportService:
             row_dict: Dict[str, Any],
             row_num: int,
             create_missing_profiles: bool,
-            duplicate_strategy: str,
-            replace_ids: Set[int]
+            ids_to_skip: Set[int]
     ) -> Dict[str, Any]:
         result = {
             'created': False,
@@ -337,19 +352,12 @@ class ExcelImportService:
         ).first()
 
         if existing_student:
-            # При стратегии skip - пропускаем все дубликаты
-            if duplicate_strategy == 'skip':
-                result['error'] = f"Дубликат ID {russian_student_id}. Строка пропущена."
+            # Если ID есть в списке пропускаемых - пропускаем
+            if russian_student_id in ids_to_skip:
+                result['error'] = f"Дубликат ID {russian_student_id} пропущен (не выбран для замены)"
                 return result
 
-            # При стратегии replace_selected - проверяем, выбран ли этот ID
-            if duplicate_strategy == 'replace_selected':
-                if russian_student_id not in replace_ids:
-                    result['error'] = f"Дубликат ID {russian_student_id} не выбран для замены. Строка пропущена."
-                    return result
-                # Если ID выбран - обновляем (продолжаем выполнение)
-
-            # Для replace_all И для replace_selected с выбранным ID - ОБНОВЛЯЕМ
+            # Иначе обновляем
             result['updated'] = True
 
             # Обновляем все поля
