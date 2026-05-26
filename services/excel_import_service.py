@@ -3,11 +3,16 @@ from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional, Set
 from datetime import datetime
 import re
+import logging
 
 from database.schema import (
     Student, StudentApplication, Profile,
     StudentStatus, StudyForm, StudyBasis, ApplicationStatus
 )
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def normalize_full_name(full_name: str) -> str:
@@ -136,7 +141,7 @@ class ExcelImportService:
 
         records = df.to_dict(orient='records')
 
-        # Удаляем дубликаты внутри файла (оставляем только первое вхождение каждого ID)
+        # Удаляем дубликаты внутри файла
         seen_ids = set()
         unique_records = []
         duplicate_ids_in_file = set()
@@ -168,9 +173,12 @@ class ExcelImportService:
 
         records = unique_records
 
-        # Проверка дубликатов в БД
+        # Собираем все ID из файла
         all_ids = []
-        for row_dict in records:
+        id_to_row = {}
+        id_to_row_num = {}
+
+        for idx, row_dict in enumerate(records):
             russian_student_id_raw = row_dict.get('russian_student_id')
             if pd.isna(russian_student_id_raw) or russian_student_id_raw is None:
                 continue
@@ -182,16 +190,24 @@ class ExcelImportService:
                     student_id = int(float(russian_student_id_raw))
                 if student_id and student_id > 0:
                     all_ids.append(student_id)
+                    id_to_row[student_id] = row_dict
+                    id_to_row_num[student_id] = idx + 2  # +2 для учета заголовка и 0-индексации
             except (ValueError, TypeError):
                 continue
 
+        # Находим существующих студентов в БД
         existing_students = self.db.query(Student).filter(
             Student.russian_student_id.in_(set(all_ids))
         ).all()
 
         existing_ids = {s.russian_student_id for s in existing_students}
+        existing_students_dict = {s.russian_student_id: s for s in existing_students}
 
-        # Логика обработки дубликатов ПРИ ПЕРВОМ ЗАПРОСЕ (skip)
+        logger.info(f"📊 Статистика дубликатов:")
+        logger.info(f"   existing_ids: {existing_ids}")
+        logger.info(f"   replace_ids: {replace_ids}")
+        logger.info(f"   duplicate_strategy: {duplicate_strategy}")
+
         # Если стратегия skip и есть дубликаты - возвращаем их список для выбора
         if duplicate_strategy == 'skip' and existing_ids:
             duplicates_found = [
@@ -210,21 +226,21 @@ class ExcelImportService:
                 'duplicates_found': duplicates_found
             }
 
-        # Для replace_selected - фильтруем, какие дубликаты нужно обработать
-        # Создаем множество ID, которые НЕ нужно обрабатывать (пропускаем)
+        # Определяем, какие ID обновлять, какие пропускать
+        ids_to_update = set()
         ids_to_skip = set()
-        if duplicate_strategy == 'replace_selected':
-            # ID, которые есть в БД, но НЕ выбраны для замены - их пропускаем
-            ids_to_skip = existing_ids - replace_ids
-            # Если после вычитания остались ID, которые нужно пропустить, логируем
-            if ids_to_skip:
-                print(f"Будут пропущены дубликаты ID: {ids_to_skip}")
-        elif duplicate_strategy == 'replace_all':
-            # Все дубликаты будут обновлены, ничего не пропускаем
-            ids_to_skip = set()
-        elif duplicate_strategy == 'skip':
-            # Все дубликаты пропускаем
+
+        if duplicate_strategy == 'replace_all':
+            ids_to_update = existing_ids.copy()
+            logger.info(f"   replace_all: обновляем ВСЕ {len(ids_to_update)} дубликатов")
+        elif duplicate_strategy == 'replace_selected':
+            ids_to_update = replace_ids & existing_ids
+            ids_to_skip = existing_ids - ids_to_update
+            logger.info(f"   replace_selected: обновляем {len(ids_to_update)} ID: {ids_to_update}")
+            logger.info(f"   replace_selected: пропускаем {len(ids_to_skip)} ID: {ids_to_skip}")
+        else:
             ids_to_skip = existing_ids
+            logger.info(f"   skip: пропускаем ВСЕ {len(ids_to_skip)} дубликатов")
 
         created_students = 0
         updated_students = 0
@@ -235,44 +251,175 @@ class ExcelImportService:
         if duplicate_ids_in_file:
             warnings.append({"row": 0, "warning": f"Пропущено {len(duplicate_ids_in_file)} дубликатов внутри файла"})
 
-        for idx, row_dict in enumerate(records):
-            row_num = idx + 2
+        # Добавляем предупреждения о пропущенных дубликатах (НЕ ОШИБКИ!)
+        for student_id in ids_to_skip:
+            student = existing_students_dict.get(student_id)
+            if student:
+                warnings.append({
+                    "row": id_to_row_num.get(student_id, 0),
+                    "warning": f"Дубликат ID {student_id} (ФИО: {student.full_name}) пропущен - не выбран для замены"
+                })
+
+        # Обрабатываем каждого студента из файла
+        for student_id, row_dict in id_to_row.items():
+            row_num = id_to_row_num.get(student_id, 0)
 
             try:
-                result = await self._process_row_dict(
-                    row_dict=row_dict,
-                    row_num=row_num,
-                    create_missing_profiles=create_missing_profiles,
-                    ids_to_skip=ids_to_skip
-                )
+                existing_student = existing_students_dict.get(student_id)
 
-                if result.get('error'):
-                    errors.append({"row": row_num, "error": result['error']})
-                else:
-                    if result.get('created'):
-                        created_students += 1
-                    if result.get('updated'):
+                if existing_student:
+                    # Студент существует
+                    if student_id in ids_to_skip:
+                        # Пропускаем (уже добавили предупреждение)
+                        continue
+
+                    if student_id in ids_to_update:
+                        # Обновляем
+                        logger.info(f"🔄 Обновляем ID {student_id}")
                         updated_students += 1
-                    created_applications += result.get('applications_created', 0)
-                    if result.get('warnings'):
-                        warnings.extend([{"row": row_num, "warning": w} for w in result['warnings']])
+
+                        # Получаем данные из строки
+                        full_name_raw = row_dict.get('full_name')
+                        phone_raw = row_dict.get('phone')
+                        email_raw = row_dict.get('email')
+                        study_form_val = row_dict.get('study_form')
+                        study_basis_val = row_dict.get('study_basis')
+                        profile_name_val = row_dict.get('profile_name')
+                        score_raw = row_dict.get('score')
+                        priority_raw = row_dict.get('priority')
+
+                        normalized_full_name = normalize_full_name(
+                            str(full_name_raw).strip()) if full_name_raw and not pd.isna(
+                            full_name_raw) else existing_student.full_name
+                        normalized_phone = self._normalize_phone(str(phone_raw)) if phone_raw and not pd.isna(
+                            phone_raw) else existing_student.phone
+
+                        logger.info(f"   Старое ФИО: {existing_student.full_name} -> Новое: {normalized_full_name}")
+                        logger.info(f"   Старый телефон: {existing_student.phone} -> Новый: {normalized_phone}")
+
+                        # Обновляем поля
+                        existing_student.full_name = normalized_full_name
+                        existing_student.phone = normalized_phone
+
+                        if email_raw and not pd.isna(email_raw):
+                            additional_contacts = existing_student.additional_contacts or {}
+                            additional_contacts['email'] = str(email_raw).strip()
+                            existing_student.additional_contacts = additional_contacts
+
+                        if study_form_val and not pd.isna(study_form_val):
+                            parsed_form = self._parse_study_form(str(study_form_val))
+                            if parsed_form:
+                                existing_student.study_form = parsed_form
+
+                        if study_basis_val and not pd.isna(study_basis_val):
+                            parsed_basis = self._parse_study_basis(str(study_basis_val))
+                            if parsed_basis:
+                                existing_student.study_basis = parsed_basis
+
+                        existing_student.updated_at = datetime.utcnow()
+                        self.db.flush()
+
+                        # Обработка заявления
+                        if profile_name_val and not pd.isna(profile_name_val):
+                            result = {'warnings': []}
+                            await self._process_application_dict(
+                                student=existing_student,
+                                profile_name=str(profile_name_val).strip(),
+                                score_raw=score_raw,
+                                priority_raw=priority_raw,
+                                study_form_val=study_form_val,
+                                study_basis_val=study_basis_val,
+                                create_missing_profiles=create_missing_profiles,
+                                result=result
+                            )
+                            created_applications += result.get('applications_created', 0)
+                            if result.get('warnings'):
+                                warnings.extend([{"row": row_num, "warning": w} for w in result['warnings']])
+                else:
+                    # Создаем нового студента
+                    logger.info(f"✨ Создаем нового студента ID {student_id}")
+                    created_students += 1
+
+                    full_name_raw = row_dict.get('full_name')
+                    phone_raw = row_dict.get('phone')
+                    email_raw = row_dict.get('email')
+                    study_form_val = row_dict.get('study_form')
+                    study_basis_val = row_dict.get('study_basis')
+                    profile_name_val = row_dict.get('profile_name')
+                    score_raw = row_dict.get('score')
+                    priority_raw = row_dict.get('priority')
+
+                    normalized_full_name = normalize_full_name(
+                        str(full_name_raw).strip()) if full_name_raw and not pd.isna(full_name_raw) else ""
+                    normalized_phone = self._normalize_phone(str(phone_raw)) if phone_raw and not pd.isna(
+                        phone_raw) else ""
+
+                    study_form_parsed = None
+                    if study_form_val and not pd.isna(study_form_val):
+                        study_form_parsed = self._parse_study_form(str(study_form_val))
+
+                    study_basis_parsed = None
+                    if study_basis_val and not pd.isna(study_basis_val):
+                        study_basis_parsed = self._parse_study_basis(str(study_basis_val))
+
+                    additional_contacts = {}
+                    if email_raw and not pd.isna(email_raw):
+                        additional_contacts['email'] = str(email_raw).strip()
+
+                    new_student = Student(
+                        russian_student_id=student_id,
+                        full_name=normalized_full_name,
+                        phone=normalized_phone,
+                        additional_contacts=additional_contacts if additional_contacts else None,
+                        study_form=study_form_parsed,
+                        study_basis=study_basis_parsed,
+                        status=StudentStatus.ACTIVE,
+                        kurator_id=self.user_id,
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow()
+                    )
+                    self.db.add(new_student)
+                    self.db.flush()
+
+                    # Обработка заявления
+                    if profile_name_val and not pd.isna(profile_name_val):
+                        result = {'warnings': []}
+                        await self._process_application_dict(
+                            student=new_student,
+                            profile_name=str(profile_name_val).strip(),
+                            score_raw=score_raw,
+                            priority_raw=priority_raw,
+                            study_form_val=study_form_val,
+                            study_basis_val=study_basis_val,
+                            create_missing_profiles=create_missing_profiles,
+                            result=result
+                        )
+                        created_applications += result.get('applications_created', 0)
+                        if result.get('warnings'):
+                            warnings.extend([{"row": row_num, "warning": w} for w in result['warnings']])
 
             except Exception as e:
+                logger.error(f"Ошибка при обработке ID {student_id}: {e}")
                 errors.append({"row": row_num, "error": f"Ошибка: {str(e)}"})
 
         if not errors:
             self.db.commit()
+            logger.info(f"✅ Импорт завершен. Создано: {created_students}, Обновлено: {updated_students}")
         else:
             self.db.rollback()
+            logger.error(f"❌ Импорт отменен из-за критических ошибок. Ошибок: {len(errors)}")
+
+        # Успех, если нет критических ошибок (пропущенные дубликаты - это не ошибки)
+        success = len(errors) == 0
 
         return {
-            'success': len(errors) == 0,
+            'success': success,
             'total_rows': len(df),
             'created_students': created_students,
             'updated_students': updated_students,
             'created_applications': created_applications,
-            'errors': errors,
-            'warnings': warnings,
+            'errors': errors,  # Только критические ошибки
+            'warnings': warnings,  # Пропущенные дубликаты и другие предупреждения
             'message': f"Импорт завершен. Создано: {created_students}, Обновлено: {updated_students}, Заявлений: {created_applications}",
             'duplicates_found': None
         }
@@ -286,149 +433,6 @@ class ExcelImportService:
         if rename_dict:
             df = df.rename(columns=rename_dict)
         return df
-
-    async def _process_row_dict(
-            self,
-            row_dict: Dict[str, Any],
-            row_num: int,
-            create_missing_profiles: bool,
-            ids_to_skip: Set[int]
-    ) -> Dict[str, Any]:
-        result = {
-            'created': False,
-            'updated': False,
-            'applications_created': 0,
-            'warnings': [],
-            'error': None
-        }
-
-        # Получаем значения
-        full_name_raw = row_dict.get('full_name')
-        phone_raw = row_dict.get('phone')
-        russian_student_id_raw = row_dict.get('russian_student_id')
-        email_raw = row_dict.get('email')
-        profile_name_val = row_dict.get('profile_name')
-        score_raw = row_dict.get('score')
-        priority_raw = row_dict.get('priority')
-        study_form_val = row_dict.get('study_form')
-        study_basis_val = row_dict.get('study_basis')
-
-        if pd.isna(full_name_raw) or not full_name_raw or not str(full_name_raw).strip():
-            result['error'] = "ФИО обязательно"
-            return result
-
-        if pd.isna(phone_raw) or not phone_raw or not str(phone_raw).strip():
-            result['error'] = "Телефон обязателен"
-            return result
-
-        if pd.isna(russian_student_id_raw) or russian_student_id_raw is None:
-            result['error'] = "ID поступающего обязателен"
-            return result
-
-        try:
-            if isinstance(russian_student_id_raw, str):
-                cleaned = re.sub(r'[^\d]', '', russian_student_id_raw)
-                russian_student_id = int(cleaned) if cleaned else None
-            else:
-                russian_student_id = int(float(russian_student_id_raw))
-
-            if russian_student_id is None or russian_student_id <= 0:
-                result['error'] = "ID должен быть положительным числом"
-                return result
-        except (ValueError, TypeError):
-            result['error'] = f"ID должен быть числом, получено: {russian_student_id_raw}"
-            return result
-
-        email = None
-        if email_raw and not pd.isna(email_raw):
-            email = str(email_raw).strip()
-
-        normalized_full_name = normalize_full_name(str(full_name_raw).strip())
-        normalized_phone = self._normalize_phone(str(phone_raw))
-
-        # Проверяем существование в БД
-        existing_student = self.db.query(Student).filter(
-            Student.russian_student_id == russian_student_id
-        ).first()
-
-        if existing_student:
-            # Если ID есть в списке пропускаемых - пропускаем
-            if russian_student_id in ids_to_skip:
-                result['error'] = f"Дубликат ID {russian_student_id} пропущен (не выбран для замены)"
-                return result
-
-            # Иначе обновляем
-            result['updated'] = True
-
-            # Обновляем все поля
-            existing_student.full_name = normalized_full_name
-            existing_student.phone = normalized_phone
-
-            if email:
-                additional_contacts = existing_student.additional_contacts or {}
-                additional_contacts['email'] = email
-                existing_student.additional_contacts = additional_contacts
-
-            if study_form_val and not pd.isna(study_form_val):
-                parsed_form = self._parse_study_form(str(study_form_val))
-                if parsed_form:
-                    existing_student.study_form = parsed_form
-
-            if study_basis_val and not pd.isna(study_basis_val):
-                parsed_basis = self._parse_study_basis(str(study_basis_val))
-                if parsed_basis:
-                    existing_student.study_basis = parsed_basis
-
-            existing_student.updated_at = datetime.utcnow()
-            self.db.flush()
-            student_for_apps = existing_student
-
-        else:
-            # Создание нового
-            result['created'] = True
-
-            study_form_parsed = None
-            if study_form_val and not pd.isna(study_form_val):
-                study_form_parsed = self._parse_study_form(str(study_form_val))
-
-            study_basis_parsed = None
-            if study_basis_val and not pd.isna(study_basis_val):
-                study_basis_parsed = self._parse_study_basis(str(study_basis_val))
-
-            additional_contacts = {}
-            if email:
-                additional_contacts['email'] = email
-
-            new_student = Student(
-                russian_student_id=russian_student_id,
-                full_name=normalized_full_name,
-                phone=normalized_phone,
-                additional_contacts=additional_contacts if additional_contacts else None,
-                study_form=study_form_parsed,
-                study_basis=study_basis_parsed,
-                status=StudentStatus.ACTIVE,
-                kurator_id=self.user_id,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
-            )
-            self.db.add(new_student)
-            self.db.flush()
-            student_for_apps = new_student
-
-        # Обработка заявления
-        if profile_name_val and not pd.isna(profile_name_val) and str(profile_name_val).strip():
-            await self._process_application_dict(
-                student=student_for_apps,
-                profile_name=str(profile_name_val).strip(),
-                score_raw=score_raw,
-                priority_raw=priority_raw,
-                study_form_val=study_form_val,
-                study_basis_val=study_basis_val,
-                create_missing_profiles=create_missing_profiles,
-                result=result
-            )
-
-        return result
 
     async def _process_application_dict(
             self,
@@ -513,7 +517,7 @@ class ExcelImportService:
 
         try:
             self.db.flush()
-            result['applications_created'] += 1
+            result['applications_created'] = result.get('applications_created', 0) + 1
         except Exception as e:
             result['warnings'].append(f"Ошибка при создании заявления: {str(e)}")
 
