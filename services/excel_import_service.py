@@ -6,8 +6,8 @@ import re
 
 from database.schema import (
     Student, StudentApplication, Profile,
-    StudentStatus, StudyForm, StudyBasis,
-    ApplicationStatus
+    StudentStatus, StudyForm, StudyBasis, ApplicationStatus,
+    MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus
 )
 
 
@@ -113,9 +113,9 @@ class ExcelImportService:
         # Преобразуем DataFrame в список словарей
         records = df.to_dict(orient='records')
 
-        # ========== ВАЖНО: СНАЧАЛА СОБИРАЕМ ВСЕ ID И НАХОДИМ ДУБЛИКАТЫ ==========
+        # ========== СНАЧАЛА СОБИРАЕМ ВСЕ ID И НАХОДИМ ДУБЛИКАТЫ ==========
         all_ids = []
-        id_to_name_map = {}  # ID -> ФИО из файла (для отображения)
+        id_to_name_map = {}
 
         for idx, row_dict in enumerate(records):
             russian_student_id_raw = row_dict.get('russian_student_id')
@@ -131,42 +131,46 @@ class ExcelImportService:
 
                 if student_id and student_id > 0:
                     all_ids.append(student_id)
-                    # Сохраняем ФИО из файла для этого ID
                     full_name = row_dict.get('full_name', '')
                     if student_id not in id_to_name_map:
                         id_to_name_map[student_id] = str(full_name) if not pd.isna(full_name) else 'Неизвестно'
             except (ValueError, TypeError):
                 continue
 
-        # Находим дубликаты в БД (студенты, которые уже существуют)
+        # Находим дубликаты в БД
         existing_students = self.db.query(Student).filter(
             Student.russian_student_id.in_(set(all_ids))
         ).all()
 
-        # Формируем список дубликатов с ID и ФИО из БД
+        # Формируем список дубликатов
         duplicates_found = []
         for student in existing_students:
             duplicates_found.append({
                 "id": student.russian_student_id,
-                "full_name": student.full_name  # Берем ФИО из БД
+                "full_name": student.full_name
             })
 
-        # Если стратегия SKIP и есть дубликаты - возвращаем ошибку со списком дубликатов
-        if duplicate_strategy == 'skip' and duplicates_found:
+        # ========== ЛОГИКА ОБРАБОТКИ ДУБЛИКАТОВ ==========
+        # При стратегии SKIP - просто продолжаем, дубликаты будут пропущены в _process_row_dict
+        if duplicate_strategy == 'skip':
+            # Не возвращаем ошибку, просто продолжаем импорт
+            pass
+        elif duplicate_strategy == 'replace_selected' and not replace_ids:
+            # Ошибка: выбрана замена выбранных, но не указаны ID
             return {
                 'success': False,
                 'total_rows': len(df),
                 'created_students': 0,
                 'updated_students': 0,
                 'created_applications': 0,
-                'errors': [
-                    {"row": 0, "error": f"Найдено {len(duplicates_found)} дубликатов. Используйте стратегию замены."}],
+                'errors': [{"row": 0, "error": "Для стратегии 'replace_selected' необходимо указать ID для замены"}],
                 'warnings': [],
-                'message': "Импорт прерван: найдены дубликаты",
-                'duplicates_found': duplicates_found  # ВОЗВРАЩАЕМ СПИСОК ДУБЛИКАТОВ
+                'message': "Импорт прерван: не указаны ID для замены",
+                'duplicates_found': duplicates_found
             }
+        # Для replace_all и replace_selected (с ID) - продолжаем обработку
 
-        # ========== ДАЛЬШЕ ОБРАБОТКА СТРОК С УЧЕТОМ СТРАТЕГИИ ==========
+        # ========== ОБРАБОТКА СТРОК С УЧЕТОМ СТРАТЕГИИ ==========
         created_students = 0
         updated_students = 0
         created_applications = 0
@@ -204,6 +208,12 @@ class ExcelImportService:
         else:
             self.db.rollback()
 
+        # Формируем сообщение
+        if duplicate_strategy == 'skip' and duplicates_found:
+            message = f"Импорт завершен. Пропущено дубликатов: {len(duplicates_found)}. Создано: {created_students}, Обновлено: {updated_students}, Заявлений: {created_applications}"
+        else:
+            message = f"Импорт завершен. Создано: {created_students}, Обновлено: {updated_students}, Заявлений: {created_applications}"
+
         return {
             'success': len(errors) == 0,
             'total_rows': len(df),
@@ -212,8 +222,8 @@ class ExcelImportService:
             'created_applications': created_applications,
             'errors': errors,
             'warnings': warnings,
-            'message': f"Импорт завершен. Создано: {created_students}, Обновлено: {updated_students}, Заявлений: {created_applications}",
-            'duplicates_found': None
+            'message': message,
+            'duplicates_found': duplicates_found if duplicate_strategy == 'skip' and duplicates_found else None
         }
 
     def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -295,13 +305,18 @@ class ExcelImportService:
         ).first()
 
         if existing_student:
-            # При замене selected - проверяем, выбран ли этот ID
+            # При стратегии skip - пропускаем дубликат
+            if duplicate_strategy == 'skip':
+                result['error'] = f"Дубликат ID {russian_student_id}. Строка пропущена."
+                return result
+
+            # При стратегии replace_selected - проверяем, выбран ли этот ID
             if duplicate_strategy == 'replace_selected':
                 if russian_student_id not in replace_ids:
                     result['error'] = f"Дубликат ID {russian_student_id} не выбран для замены. Строка пропущена."
                     return result
 
-            # Обновление существующего
+            # Обновление существующего (для replace_all или replace_selected с выбранным ID)
             result['updated'] = True
             existing_student.full_name = str(full_name).strip()
             existing_student.phone = self._normalize_phone(str(phone_raw))
@@ -350,6 +365,10 @@ class ExcelImportService:
                 study_basis=study_basis_parsed,
                 status=StudentStatus.ACTIVE,
                 kurator_id=self.user_id,
+                meeting_status=MeetingStatus.UNKNOWN,
+                call_status=CallStatus.UNKNOWN,
+                decision_status=DecisionStatus.UNKNOWN,
+                documents_status=DocumentsStatus.UNKNOWN,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
@@ -386,7 +405,6 @@ class ExcelImportService:
         """Обрабатывает заявление из словаря"""
 
         # Очищаем название профиля (берем только первую часть, до точки с запятой)
-        # Так как в Excel часто приходят составные названия через ";"
         clean_profile_name = profile_name.split(';')[0].strip()
 
         # Поиск профиля
@@ -435,13 +453,13 @@ class ExcelImportService:
         if study_form_val and not pd.isna(study_form_val):
             study_form_for_apps = self._parse_study_form(str(study_form_val))
         if not study_form_for_apps:
-            study_form_for_apps = student.study_form or profile.study_form
+            study_form_for_apps = student.study_form
 
         study_basis_for_apps = None
         if study_basis_val and not pd.isna(study_basis_val):
             study_basis_for_apps = self._parse_study_basis(str(study_basis_val))
         if not study_basis_for_apps:
-            study_basis_for_apps = student.study_basis or profile.study_basis
+            study_basis_for_apps = student.study_basis
 
         # Создаем заявление
         application = StudentApplication(
