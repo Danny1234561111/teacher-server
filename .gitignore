@@ -18,3 +18,12 @@ postgres_data/
 *.tar
 *.gz
 docker-compose.override.yml
+
+# Локальные .env файлы
+.env
+.env.local
+.env.production
+
+# Docker override
+docker-compose.override.yml
+docker-compose.local.yml
