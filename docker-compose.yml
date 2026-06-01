@@ -1,0 +1,15 @@
+﻿version: '3.8'
+
+services:
+  backend:
+    build: .
+    container_name: university_admissions_api
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/university_admissions
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-super-secret-jwt-key}
+      - DEBUG=${DEBUG:-false}
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    restart: unless-stopped
