@@ -241,17 +241,14 @@ class ExcelImportService:
         else:
             ids_to_skip = existing_ids
             logger.info(f"   skip: пропускаем ВСЕ {len(ids_to_skip)} дубликатов")
-
         created_students = 0
         updated_students = 0
         created_applications = 0
         errors = []
         warnings = []
-
         if duplicate_ids_in_file:
             warnings.append({"row": 0, "warning": f"Пропущено {len(duplicate_ids_in_file)} дубликатов внутри файла"})
-
-        # Добавляем предупреждения о пропущенных дубликатах (НЕ ОШИБКИ!)
+        # Добавляем предупреждения о пропущенных дубликатах
         for student_id in ids_to_skip:
             student = existing_students_dict.get(student_id)
             if student:
@@ -263,7 +260,6 @@ class ExcelImportService:
         # Обрабатываем каждого студента из файла
         for student_id, row_dict in id_to_row.items():
             row_num = id_to_row_num.get(student_id, 0)
-
             try:
                 existing_student = existing_students_dict.get(student_id)
 

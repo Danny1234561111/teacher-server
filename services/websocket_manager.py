@@ -25,7 +25,6 @@ class WebSocketManager:
             logger.info(f"📱 Мобильное устройство отключено: user_id={user_id}")
 
     async def send_command(self, user_id: int, command: dict) -> bool:
-        """Отправить команду на мобильное устройство"""
         if user_id in self._mobile_connections:
             try:
                 await self._mobile_connections[user_id].send_json(command)
