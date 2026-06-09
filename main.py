@@ -57,13 +57,17 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS - настройки
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://158.160.67.3:3000",
+        "http://localhost:3000",
+        "http://158.160.67.3",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["Content-Type", "Authorization", "Cookie", "Set-Cookie", "Accept"],
+    expose_headers=["Set-Cookie"],
 )
 
 # Подключаем HTTP роутеры

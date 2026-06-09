@@ -1230,3 +1230,123 @@ async def get_communication_stats(
         db=db,
         days_back=days_back
     )
+
+
+# ==================== ВЕБ-ЭНДПОИНТЫ (Cookie) ====================
+
+async def get_current_user_web(
+        request: Request,
+        db: Session = Depends(get_db)
+) -> User:
+    """Получение текущего пользователя из cookie для веб-приложения"""
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Токен не найден")
+
+    user_data = auth_service.get_user_by_token(token, db)
+    user = db.query(User).filter(User.id == user_data['id']).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    return user
+
+
+@router.get("/web", response_model=StudentListResponse)
+async def web_get_students(
+        request: Request,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=500),
+        status: Optional[str] = None,
+        application_status: Optional[str] = None,
+        contact_status: Optional[str] = None,
+        consent_status: Optional[bool] = None,
+        department_id: Optional[int] = None,
+        speciality_id: Optional[int] = None,
+        study_form: Optional[str] = None,
+        study_basis: Optional[str] = None,
+        search: Optional[str] = None,
+        meeting_status: Optional[str] = None,
+        call_status: Optional[str] = None,
+        decision_status: Optional[str] = None,
+        documents_status: Optional[str] = None,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    students = student_service.get_available_students(
+        user_id=current_user.id, db=db, skip=skip, limit=limit,
+        status=status, application_status=application_status, contact_status=contact_status,
+        consent_status=consent_status, department_id=department_id, speciality_id=speciality_id,
+        study_form=study_form, study_basis=study_basis, search=search,
+        meeting_status=meeting_status, call_status=call_status,
+        decision_status=decision_status, documents_status=documents_status
+    )
+    return {"total": len(students), "students": students}
+
+
+@router.get("/web/{student_id}", response_model=StudentResponse)
+async def web_get_student(
+        request: Request,
+        student_id: int,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    student = student_service.get_student_by_id(
+        student_id=student_id,
+        user_id=current_user.id,
+        db=db
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+    return student
+
+
+@router.get("/web/{student_id}/communications", response_model=List[CommunicationResponse])
+async def web_get_student_communications(
+        request: Request,
+        student_id: int,
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    student = student_service.get_student_by_id(
+        student_id=student_id,
+        user_id=current_user.id,
+        db=db
+    )
+    if not student:
+        return []
+
+    communications = communication_service.get_student_communications(
+        student_id=student_id,
+        user_id=current_user.id,
+        db=db,
+        limit=limit,
+        offset=offset
+    )
+    return communications
+
+
+@router.post("/web/{student_id}/communications", response_model=CommunicationResponse, status_code=201)
+async def web_create_student_communication(
+        request: Request,
+        student_id: int,
+        comm_data: CommunicationCreate,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    student = student_service.get_student_by_id(
+        student_id=student_id,
+        user_id=current_user.id,
+        db=db
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+
+    full_data = comm_data.dict(exclude_unset=True)
+    full_data['student_id'] = student_id
+    result = communication_service.create_communication(
+        communication_data=full_data,
+        user_id=current_user.id,
+        db=db
+    )
+    return result

@@ -1,16 +1,17 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
-from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
+from typing import Optional
 
-from services.auth_service import AuthService
 from database.database import get_db
+from services.auth_service import AuthService
 
-router = APIRouter(tags=["authentication"])
+router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+security = HTTPBearer()
 auth_service = AuthService()
 
 
-# Модели
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -31,10 +32,11 @@ class AuthResponse(BaseModel):
     message: Optional[str] = None
 
 
-# Эндпоинты
+# ==================== МОБИЛЬНЫЕ ЭНДПОИНТЫ (без изменений) ====================
+
 @router.post("/login", response_model=AuthResponse)
-async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
-    """Вход пользователя"""
+async def mobile_login(login_data: LoginRequest, db: Session = Depends(get_db)):
+    """Вход для мобильного приложения (возвращает Bearer token)"""
     try:
         result = auth_service.login(
             email=login_data.email,
@@ -43,32 +45,73 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
         )
         return result
     except ValueError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=str(e)
-        )
-    except Exception as e:
-        print(f"❌ Ошибка входа: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Внутренняя ошибка сервера"
-        )
+        raise HTTPException(status_code=401, detail=str(e))
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user(token: str, db: Session = Depends(get_db)):
-    """Получение данных пользователя по токену"""
+async def mobile_get_current_user(token: str, db: Session = Depends(get_db)):
+    """Получение профиля для мобильного приложения"""
     try:
         user = auth_service.get_user_by_token(token, db)
         return user
     except ValueError as e:
-        raise HTTPException(
-            status_code=401,
-            detail=str(e)
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+# ==================== ВЕБ-ЭНДПОИНТЫ (НОВЫЕ, с префиксом /web) ====================
+
+@router.post("/web/login")
+async def web_login(
+        login_data: LoginRequest,
+        response: Response,
+        db: Session = Depends(get_db)
+):
+    """Вход для веб-приложения (устанавливает HttpOnly cookie)"""
+    try:
+        result = auth_service.login(
+            email=login_data.email,
+            password=login_data.password,
+            db=db
         )
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Внутренняя ошибка сервера"
+
+        # Устанавливаем HttpOnly cookie
+        response.set_cookie(
+            key="access_token",
+            value=result["access_token"],
+            httponly=True,
+            secure=False,  # True для HTTPS
+            samesite="lax",
+            max_age=24 * 60 * 60,  # 24 часа
+            path="/"
         )
+
+        return {
+            "user": result["user"],
+            "message": "Вход выполнен успешно"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@router.get("/web/me")
+async def web_get_current_user(
+        request: Request,
+        db: Session = Depends(get_db)
+):
+    """Получение профиля для веб-приложения (из cookie)"""
+    token = request.cookies.get("access_token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Токен не найден")
+
+    try:
+        user = auth_service.get_user_by_token(token, db)
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@router.post("/web/logout")
+async def web_logout(response: Response):
+    """Выход для веб-приложения (удаляет cookie)"""
+    response.delete_cookie("access_token", path="/")
+    return {"message": "Выход выполнен успешно"}
