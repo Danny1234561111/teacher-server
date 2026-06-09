@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException, Depends
+# api/routes/communication.py
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any
@@ -16,10 +17,7 @@ security = HTTPBearer()
 auth_service = AuthService()
 
 
-# ===== МОДЕЛИ =====
-
 class ActiveContactUpdate(BaseModel):
-    """Обновление активного контакта"""
     contact_type: str = Field(..., description="Тип контакта: telegram, sms, call, url, vk")
     contact_value: str = Field(..., description="Значение контакта: @username, +79991234567, https://...")
 
@@ -66,14 +64,12 @@ class ActiveContactUpdate(BaseModel):
 
 
 class ActiveContactResponse(BaseModel):
-    """Ответ с активным контактом"""
     contact_type: Optional[str]
     contact_value: Optional[str]
     updated_at: Optional[datetime]
 
 
 class CommunicationSettingsUpdate(BaseModel):
-    """Обновление настроек коммуникации"""
     telegram_open_on: Optional[str] = Field(None, description="Где открывать Telegram: 'pc' или 'mobile'")
     vk_open_on: Optional[str] = Field(None, description="Где открывать VK: 'pc' или 'mobile'")
     url_open_on: Optional[str] = Field(None, description="Где открывать ссылки: 'pc' или 'mobile'")
@@ -87,45 +83,38 @@ class CommunicationSettingsUpdate(BaseModel):
 
 
 class CommunicationSettingsResponse(BaseModel):
-    """Ответ с настройками коммуникации"""
     telegram_open_on: str
     vk_open_on: str
     url_open_on: str
 
 
 class CallRequest(BaseModel):
-    """Запрос на звонок"""
     student_id: int
     phone_number: str
 
 
 class SmsRequest(BaseModel):
-    """Запрос на SMS"""
     student_id: int
     phone_number: str
     message_text: Optional[str] = None
 
 
 class TelegramRequest(BaseModel):
-    """Запрос на Telegram"""
     student_id: int
     telegram_contact: str
 
 
 class VkRequest(BaseModel):
-    """Запрос на VK"""
     student_id: int
     vk_contact: str
 
 
 class UrlRequest(BaseModel):
-    """Запрос на открытие URL"""
     student_id: int
     url: str
 
 
 class CommunicationResponse(BaseModel):
-    """Ответ на запрос коммуникации"""
     success: bool
     action: str
     target_device: str
@@ -135,28 +124,34 @@ class CommunicationResponse(BaseModel):
     fallback: Optional[str] = None
 
 
-# ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
-
-async def get_current_user(
+async def get_current_user_mobile(
         credentials: HTTPAuthorizationCredentials = Depends(security),
         db: Session = Depends(get_db)
 ) -> User:
-    """Получение текущего пользователя"""
     token = credentials.credentials
     user_data = auth_service.get_user_by_token(token, db)
-
     user = db.query(User).filter(User.id == user_data['id']).first()
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
-
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Пользователь неактивен")
+    return user
 
+
+async def get_current_user_web(
+        request: Request,
+        db: Session = Depends(get_db)
+) -> User:
+    user_data = auth_service.get_current_user_web(request, db)
+    user = db.query(User).filter(User.id == user_data['id']).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Пользователь неактивен")
     return user
 
 
 async def get_student_by_id(student_id: int, db: Session) -> Optional[Dict]:
-    """Получение студента по ID"""
     student = db.query(Student).filter(Student.id == student_id).first()
     if not student:
         return None
@@ -169,12 +164,9 @@ async def get_student_by_id(student_id: int, db: Session) -> Optional[Dict]:
 
 
 def determine_target_device(contact_type: str, user: User) -> str:
-    """Определяет, на какое устройство отправлять команду"""
-    # Звонок и SMS - только на телефон
     if contact_type in ['call', 'sms']:
         return 'mobile'
 
-    # Остальные - по настройкам пользователя
     settings_map = {
         'telegram': user.telegram_open_on or 'pc',
         'vk': user.vk_open_on or 'pc',
@@ -183,15 +175,12 @@ def determine_target_device(contact_type: str, user: User) -> str:
     return settings_map.get(contact_type, 'pc')
 
 
-# ===== 1. АКТИВНЫЙ КОНТАКТ =====
-
-@router.post("/active/set", response_model=ActiveContactResponse)
-async def set_active_contact(
+@router.post("/mobile/active/set", response_model=ActiveContactResponse)
+async def mobile_set_active_contact(
         contact_data: ActiveContactUpdate,
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
 ):
-    """Установить активный контакт"""
     valid_types = ['telegram', 'sms', 'call', 'url', 'vk']
     if contact_data.contact_type not in valid_types:
         raise HTTPException(
@@ -213,12 +202,40 @@ async def set_active_contact(
     )
 
 
-@router.get("/active/get", response_model=Optional[ActiveContactResponse])
-async def get_active_contact(
-        current_user: User = Depends(get_current_user),
+@router.post("/web/active/set", response_model=ActiveContactResponse)
+async def web_set_active_contact(
+        request: Request,
+        contact_data: ActiveContactUpdate,
         db: Session = Depends(get_db)
 ):
-    """Получить активный контакт"""
+    current_user = await get_current_user_web(request, db)
+
+    valid_types = ['telegram', 'sms', 'call', 'url', 'vk']
+    if contact_data.contact_type not in valid_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Неверный тип. Допустимые: {', '.join(valid_types)}"
+        )
+
+    current_user.active_contact = contact_data.contact_value
+    current_user.active_contact_type = contact_data.contact_type
+    current_user.active_contact_updated_at = datetime.utcnow()
+
+    db.commit()
+    db.refresh(current_user)
+
+    return ActiveContactResponse(
+        contact_type=current_user.active_contact_type,
+        contact_value=current_user.active_contact,
+        updated_at=current_user.active_contact_updated_at
+    )
+
+
+@router.get("/mobile/active/get", response_model=Optional[ActiveContactResponse])
+async def mobile_get_active_contact(
+        current_user: User = Depends(get_current_user_mobile),
+        db: Session = Depends(get_db)
+):
     if not current_user.active_contact:
         return None
 
@@ -229,12 +246,28 @@ async def get_active_contact(
     )
 
 
-@router.delete("/active/delete")
-async def delete_active_contact(
-        current_user: User = Depends(get_current_user),
+@router.get("/web/active/get", response_model=Optional[ActiveContactResponse])
+async def web_get_active_contact(
+        request: Request,
         db: Session = Depends(get_db)
 ):
-    """Удалить активный контакт"""
+    current_user = await get_current_user_web(request, db)
+
+    if not current_user.active_contact:
+        return None
+
+    return ActiveContactResponse(
+        contact_type=current_user.active_contact_type,
+        contact_value=current_user.active_contact,
+        updated_at=current_user.active_contact_updated_at
+    )
+
+
+@router.delete("/mobile/active/delete")
+async def mobile_delete_active_contact(
+        current_user: User = Depends(get_current_user_mobile),
+        db: Session = Depends(get_db)
+):
     current_user.active_contact = None
     current_user.active_contact_type = None
     current_user.active_contact_updated_at = None
@@ -243,13 +276,27 @@ async def delete_active_contact(
     return {"message": "Активный контакт удален"}
 
 
-@router.post("/active/use")
-async def use_active_contact(
-        student_id: int,
-        current_user: User = Depends(get_current_user),
+@router.delete("/web/active/delete")
+async def web_delete_active_contact(
+        request: Request,
         db: Session = Depends(get_db)
 ):
-    """Использовать активный контакт для связи со студентом"""
+    current_user = await get_current_user_web(request, db)
+
+    current_user.active_contact = None
+    current_user.active_contact_type = None
+    current_user.active_contact_updated_at = None
+
+    db.commit()
+    return {"message": "Активный контакт удален"}
+
+
+@router.post("/mobile/active/use")
+async def mobile_use_active_contact(
+        student_id: int,
+        current_user: User = Depends(get_current_user_mobile),
+        db: Session = Depends(get_db)
+):
     student = await get_student_by_id(student_id, db)
     if not student:
         raise HTTPException(status_code=404, detail="Студент не найден")
@@ -268,7 +315,6 @@ async def use_active_contact(
         "contact_value": contact_value,
     }
 
-    # Добавляем специфические поля
     if contact_type == 'call':
         command["type"] = "make_call"
         command["phone_number"] = contact_value
@@ -315,7 +361,6 @@ async def use_active_contact(
                 student_name=student['full_name']
             )
     else:
-        # Открываем на ПК
         url = contact_value
         if contact_type == 'telegram':
             url = f"https://web.telegram.org/k/#@{contact_value.replace('@', '')}"
@@ -332,14 +377,99 @@ async def use_active_contact(
         )
 
 
-# ===== 2. НАСТРОЙКИ КОММУНИКАЦИИ =====
-
-@router.get("/settings", response_model=CommunicationSettingsResponse)
-async def get_communication_settings(
-        current_user: User = Depends(get_current_user),
+@router.post("/web/active/use")
+async def web_use_active_contact(
+        request: Request,
+        student_id: int,
         db: Session = Depends(get_db)
 ):
-    """Получить настройки коммуникации пользователя"""
+    current_user = await get_current_user_web(request, db)
+
+    student = await get_student_by_id(student_id, db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Студент не найден")
+
+    if not current_user.active_contact or not current_user.active_contact_type:
+        raise HTTPException(status_code=400, detail="Активный контакт не установлен")
+
+    contact_type = current_user.active_contact_type
+    contact_value = current_user.active_contact
+    target_device = determine_target_device(contact_type, current_user)
+
+    command = {
+        "action": contact_type,
+        "student_id": student['id'],
+        "student_name": student['full_name'],
+        "contact_value": contact_value,
+    }
+
+    if contact_type == 'call':
+        command["type"] = "make_call"
+        command["phone_number"] = contact_value
+    elif contact_type == 'sms':
+        command["type"] = "send_sms"
+        command["phone_number"] = contact_value
+        command["message_text"] = f"Здравствуйте, {student['full_name']}!"
+    elif contact_type == 'telegram':
+        command["type"] = "open_telegram"
+        command["telegram_contact"] = contact_value
+    elif contact_type == 'vk':
+        command["type"] = "open_vk"
+        command["vk_contact"] = contact_value
+    elif contact_type == 'url':
+        command["type"] = "open_url"
+        command["url"] = contact_value
+
+    if target_device == "mobile":
+        if not websocket_manager.is_connected(current_user.id):
+            return CommunicationResponse(
+                success=False,
+                action=contact_type,
+                target_device="mobile",
+                message="Мобильное устройство не подключено",
+                student_name=student['full_name'],
+                fallback=f"{contact_type}:{contact_value}"
+            )
+
+        sent = await websocket_manager.send_command(current_user.id, command)
+        if sent:
+            return CommunicationResponse(
+                success=True,
+                action=contact_type,
+                target_device="mobile",
+                message="Команда отправлена на телефон",
+                student_name=student['full_name']
+            )
+        else:
+            return CommunicationResponse(
+                success=False,
+                action=contact_type,
+                target_device="mobile",
+                message="Не удалось отправить команду",
+                student_name=student['full_name']
+            )
+    else:
+        url = contact_value
+        if contact_type == 'telegram':
+            url = f"https://web.telegram.org/k/#@{contact_value.replace('@', '')}"
+        elif contact_type == 'vk':
+            url = f"https://vk.com/{contact_value}"
+
+        return CommunicationResponse(
+            success=True,
+            action=contact_type,
+            target_device="pc",
+            message="Открыть на компьютере",
+            student_name=student['full_name'],
+            data={"url": url}
+        )
+
+
+@router.get("/mobile/settings", response_model=CommunicationSettingsResponse)
+async def mobile_get_communication_settings(
+        current_user: User = Depends(get_current_user_mobile),
+        db: Session = Depends(get_db)
+):
     user = db.query(User).filter(User.id == current_user.id).first()
 
     return CommunicationSettingsResponse(
@@ -349,13 +479,27 @@ async def get_communication_settings(
     )
 
 
-@router.put("/settings", response_model=CommunicationSettingsResponse)
-async def update_communication_settings(
-        settings: CommunicationSettingsUpdate,
-        current_user: User = Depends(get_current_user),
+@router.get("/web/settings", response_model=CommunicationSettingsResponse)
+async def web_get_communication_settings(
+        request: Request,
         db: Session = Depends(get_db)
 ):
-    """Обновить настройки коммуникации пользователя"""
+    current_user = await get_current_user_web(request, db)
+    user = db.query(User).filter(User.id == current_user.id).first()
+
+    return CommunicationSettingsResponse(
+        telegram_open_on=user.telegram_open_on or "pc",
+        vk_open_on=user.vk_open_on or "pc",
+        url_open_on=user.url_open_on or "pc"
+    )
+
+
+@router.put("/mobile/settings", response_model=CommunicationSettingsResponse)
+async def mobile_update_communication_settings(
+        settings: CommunicationSettingsUpdate,
+        current_user: User = Depends(get_current_user_mobile),
+        db: Session = Depends(get_db)
+):
     user = db.query(User).filter(User.id == current_user.id).first()
 
     if settings.telegram_open_on is not None:
@@ -374,16 +518,38 @@ async def update_communication_settings(
     )
 
 
-# ===== 3. ПРЯМАЯ КОММУНИКАЦИЯ =====
-
-@router.post("/call", response_model=CommunicationResponse)
-async def make_call(
-        request: CallRequest,
-        current_user: User = Depends(get_current_user),
+@router.put("/web/settings", response_model=CommunicationSettingsResponse)
+async def web_update_communication_settings(
+        request: Request,
+        settings: CommunicationSettingsUpdate,
         db: Session = Depends(get_db)
 ):
-    """Позвонить студенту (всегда на телефон)"""
-    student = await get_student_by_id(request.student_id, db)
+    current_user = await get_current_user_web(request, db)
+    user = db.query(User).filter(User.id == current_user.id).first()
+
+    if settings.telegram_open_on is not None:
+        user.telegram_open_on = settings.telegram_open_on
+    if settings.vk_open_on is not None:
+        user.vk_open_on = settings.vk_open_on
+    if settings.url_open_on is not None:
+        user.url_open_on = settings.url_open_on
+
+    db.commit()
+
+    return CommunicationSettingsResponse(
+        telegram_open_on=user.telegram_open_on or "pc",
+        vk_open_on=user.vk_open_on or "pc",
+        url_open_on=user.url_open_on or "pc"
+    )
+
+
+@router.post("/mobile/call", response_model=CommunicationResponse)
+async def mobile_make_call(
+        request_data: CallRequest,
+        current_user: User = Depends(get_current_user_mobile),
+        db: Session = Depends(get_db)
+):
+    student = await get_student_by_id(request_data.student_id, db)
     if not student:
         raise HTTPException(status_code=404, detail="Студент не найден")
 
@@ -394,7 +560,7 @@ async def make_call(
             target_device="mobile",
             message="Мобильное устройство не подключено",
             student_name=student['full_name'],
-            fallback=f"tel:{request.phone_number}"
+            fallback=f"tel:{request_data.phone_number}"
         )
 
     command = {
@@ -402,7 +568,7 @@ async def make_call(
         "action": "call",
         "student_id": student['id'],
         "student_name": student['full_name'],
-        "phone_number": request.phone_number,
+        "phone_number": request_data.phone_number,
     }
 
     sent = await websocket_manager.send_command(current_user.id, command)
@@ -425,34 +591,34 @@ async def make_call(
         )
 
 
-@router.post("/sms", response_model=CommunicationResponse)
-async def send_sms(
-        request: SmsRequest,
-        current_user: User = Depends(get_current_user),
+@router.post("/web/call", response_model=CommunicationResponse)
+async def web_make_call(
+        request: Request,
+        request_data: CallRequest,
         db: Session = Depends(get_db)
 ):
-    """Отправить SMS студенту (всегда на телефон)"""
-    student = await get_student_by_id(request.student_id, db)
+    current_user = await get_current_user_web(request, db)
+
+    student = await get_student_by_id(request_data.student_id, db)
     if not student:
         raise HTTPException(status_code=404, detail="Студент не найден")
 
     if not websocket_manager.is_connected(current_user.id):
         return CommunicationResponse(
             success=False,
-            action="sms",
+            action="call",
             target_device="mobile",
             message="Мобильное устройство не подключено",
             student_name=student['full_name'],
-            fallback=f"sms:{request.phone_number}"
+            fallback=f"tel:{request_data.phone_number}"
         )
 
     command = {
-        "type": "send_sms",
-        "action": "sms",
+        "type": "make_call",
+        "action": "call",
         "student_id": student['id'],
         "student_name": student['full_name'],
-        "phone_number": request.phone_number,
-        "message_text": request.message_text or f"Здравствуйте, {student['full_name']}!"
+        "phone_number": request_data.phone_number,
     }
 
     sent = await websocket_manager.send_command(current_user.id, command)
@@ -460,150 +626,16 @@ async def send_sms(
     if sent:
         return CommunicationResponse(
             success=True,
-            action="sms",
+            action="call",
             target_device="mobile",
-            message="SMS открыта на телефоне",
+            message="Звонок инициирован на телефоне",
             student_name=student['full_name']
         )
     else:
         return CommunicationResponse(
             success=False,
-            action="sms",
+            action="call",
             target_device="mobile",
             message="Не удалось отправить команду",
             student_name=student['full_name']
         )
-
-
-@router.post("/telegram", response_model=CommunicationResponse)
-async def open_telegram(
-        request: TelegramRequest,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    """Открыть Telegram (по настройкам пользователя)"""
-    student = await get_student_by_id(request.student_id, db)
-    if not student:
-        raise HTTPException(status_code=404, detail="Студент не найден")
-
-    user = db.query(User).filter(User.id == current_user.id).first()
-    target_device = determine_target_device("telegram", user)
-
-    if target_device == "mobile" and websocket_manager.is_connected(current_user.id):
-        command = {
-            "type": "open_telegram",
-            "action": "telegram",
-            "student_id": student['id'],
-            "student_name": student['full_name'],
-            "telegram_contact": request.telegram_contact,
-        }
-        sent = await websocket_manager.send_command(current_user.id, command)
-        if sent:
-            return CommunicationResponse(
-                success=True,
-                action="telegram",
-                target_device="mobile",
-                message="Telegram открывается на телефоне",
-                student_name=student['full_name']
-            )
-
-    # Fallback на ПК
-    username = request.telegram_contact.replace('@', '').strip()
-    url = f"https://web.telegram.org/k/#@{username}"
-
-    return CommunicationResponse(
-        success=True,
-        action="telegram",
-        target_device="pc",
-        message="Открыть Telegram в браузере",
-        student_name=student['full_name'],
-        data={"url": url}
-    )
-
-
-@router.post("/vk", response_model=CommunicationResponse)
-async def open_vk(
-        request: VkRequest,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    """Открыть VK (по настройкам пользователя)"""
-    student = await get_student_by_id(request.student_id, db)
-    if not student:
-        raise HTTPException(status_code=404, detail="Студент не найден")
-
-    user = db.query(User).filter(User.id == current_user.id).first()
-    target_device = determine_target_device("vk", user)
-
-    if target_device == "mobile" and websocket_manager.is_connected(current_user.id):
-        command = {
-            "type": "open_vk",
-            "action": "vk",
-            "student_id": student['id'],
-            "student_name": student['full_name'],
-            "vk_contact": request.vk_contact,
-        }
-        sent = await websocket_manager.send_command(current_user.id, command)
-        if sent:
-            return CommunicationResponse(
-                success=True,
-                action="vk",
-                target_device="mobile",
-                message="VK открывается на телефоне",
-                student_name=student['full_name']
-            )
-
-    # Fallback на ПК
-    url = f"https://vk.com/{request.vk_contact}"
-
-    return CommunicationResponse(
-        success=True,
-        action="vk",
-        target_device="pc",
-        message="Открыть VK в браузере",
-        student_name=student['full_name'],
-        data={"url": url}
-    )
-
-
-@router.post("/url", response_model=CommunicationResponse)
-async def open_url(
-        request: UrlRequest,
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db)
-):
-    """Открыть URL (по настройкам пользователя)"""
-    student = await get_student_by_id(request.student_id, db)
-    if not student:
-        raise HTTPException(status_code=404, detail="Студент не найден")
-
-    user = db.query(User).filter(User.id == current_user.id).first()
-    target_device = determine_target_device("url", user)
-
-    if target_device == "mobile" and websocket_manager.is_connected(current_user.id):
-        command = {
-            "type": "open_url",
-            "action": "url",
-            "student_id": student['id'],
-            "student_name": student['full_name'],
-            "url": request.url,
-        }
-        sent = await websocket_manager.send_command(current_user.id, command)
-        if sent:
-            return CommunicationResponse(
-                success=True,
-                action="url",
-                target_device="mobile",
-                message="Ссылка открывается на телефоне",
-                student_name=student['full_name']
-            )
-
-    # Fallback на ПК
-    return CommunicationResponse(
-        success=True,
-        action="url",
-        target_device="pc",
-        message="Открыть ссылку в браузере",
-        student_name=student['full_name'],
-        data={"url": request.url}
-    )
