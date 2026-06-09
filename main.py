@@ -4,10 +4,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 import os
-import jwt
 
-# Импортируем роутеры
-from api.routes import auth, admin, students, communication, excel_import
+# Импортируем роутеры из папки routers (не api.routes)
+from routers import auth, admin, students, user_contact, excel_import
 from database.database import init_db, get_db
 from services.scheduler import scheduler
 from services.auth_service import AuthService
@@ -76,10 +75,9 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(students.router, prefix="/api/students", tags=["Students"])
-app.include_router(communication.router, prefix="/api/user/contact", tags=["User Contact"])
+app.include_router(user_contact.router, prefix="/api/user/contact", tags=["User Contact"])
 app.include_router(excel_import.router, prefix="/api/excel-import", tags=["Excel Import"])
 
-# main.py (только WebSocket часть, остальное без изменений)
 
 # ===== WEBSOCKET ЭНДПОИНТ =====
 @app.websocket("/ws/mobile/{token}")
@@ -88,7 +86,7 @@ async def websocket_mobile_endpoint(websocket: WebSocket, token: str):
     db = None
     user_id = None
 
-    logger.info(f"🔌 Новое WebSocket соединение с токеном: {token[:50]}...")
+    logger.info(f"🔌 Новое WebSocket соединение")
 
     try:
         # Создаем сессию БД
@@ -129,7 +127,7 @@ async def websocket_mobile_endpoint(websocket: WebSocket, token: str):
                 await websocket.close(code=1008, reason="User is inactive")
                 return
 
-            logger.info(f"✅ WebSocket: Пользователь {user_id} ({user_data.get('email')}) найден и активен")
+            logger.info(f"✅ WebSocket: Пользователь {user_id} найден и активен")
 
         except ValueError as e:
             logger.error(f"❌ WebSocket: Ошибка получения пользователя: {e}")
@@ -140,12 +138,12 @@ async def websocket_mobile_endpoint(websocket: WebSocket, token: str):
             await websocket.close(code=1011, reason="Internal error")
             return
 
-        # Передаем управление обработчику WebSocket (он сам примет соединение)
+        # Передаем управление обработчику WebSocket
         logger.info(f"🚀 Передача управления обработчику WebSocket для user_id={user_id}")
         await handle_mobile_websocket(websocket, user_id)
 
     except WebSocketDisconnect:
-        logger.info(f"🔌 WebSocket разрыв соединения (ранний) для user_id={user_id}")
+        logger.info(f"🔌 WebSocket разрыв соединения")
     except Exception as e:
         logger.error(f"💥 Критическая ошибка в WebSocket эндпоинте: {e}", exc_info=True)
         try:
@@ -155,7 +153,6 @@ async def websocket_mobile_endpoint(websocket: WebSocket, token: str):
     finally:
         if db:
             db.close()
-            logger.debug(f"🔒 Сессия БД закрыта для user_id={user_id}")
 
 
 @app.get("/")
@@ -178,7 +175,7 @@ async def root():
             "last_run": scheduler.last_run.isoformat() if scheduler.last_run else None,
             "last_stats": scheduler.last_stats
         },
-        "active_connections": websocket_manager.get_connection_count()
+        "active_connections": websocket_manager.get_connection_count() if hasattr(websocket_manager, 'get_connection_count') else 0
     }
 
 
@@ -188,7 +185,7 @@ async def health_check():
         "status": "healthy",
         "database": "connected",
         "parser": "running" if scheduler.is_running else "stopped",
-        "websocket_connections": websocket_manager.get_connection_count(),
+        "websocket_connections": websocket_manager.get_connection_count() if hasattr(websocket_manager, 'get_connection_count') else 0,
         "version": "5.0.0"
     }
 
