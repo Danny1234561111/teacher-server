@@ -653,7 +653,8 @@ async def get_student_competitive_info_mobile(
 
     department = db.query(Department).filter(Department.id == main_application.department_id).first()
     speciality = db.query(Speciality).filter(Speciality.id == main_application.speciality_id).first()
-    profile = db.query(Profile).filter(Profile.id == main_application.profile_id).first() if main_application.profile_id else None
+    profile = db.query(Profile).filter(
+        Profile.id == main_application.profile_id).first() if main_application.profile_id else None
 
     budget_places_free = None
     if main_application.budget_places_total and main_application.budget_places_filled:
@@ -880,13 +881,16 @@ async def get_group_statistics_mobile(
                 "min_score": profile.min_score or 0,
                 "max_score": profile.max_score or 0,
                 "budget": {"total": profile.budget_places or 0, "filled": profile.budget_filled or 0,
-                           "free": profile.budget_free or 0, "applicants_in_range": profile.budget_applicants_in_range or 0,
+                           "free": profile.budget_free or 0,
+                           "applicants_in_range": profile.budget_applicants_in_range or 0,
                            "applicants_with_consent": profile.budget_applicants_with_consent or 0,
                            "passing_score": profile.budget_passing_score or 0},
                 "paid": {"total": profile.paid_places or 0, "filled": profile.paid_filled or 0,
-                         "free": profile.paid_free or 0, "applicants_with_consent": profile.paid_applicants_with_consent or 0},
+                         "free": profile.paid_free or 0,
+                         "applicants_with_consent": profile.paid_applicants_with_consent or 0},
                 "target": {"total": profile.target_places or 0, "filled": profile.target_filled or 0,
-                           "free": profile.target_free or 0, "applicants_with_consent": profile.target_applicants_with_consent or 0},
+                           "free": profile.target_free or 0,
+                           "applicants_with_consent": profile.target_applicants_with_consent or 0},
                 "competition": profile.competition or 0,
                 "passing_score_current": profile.passing_score_current or 0,
                 "passing_score_last_year": profile.passing_score_last_year or 0
@@ -1097,7 +1101,8 @@ async def web_get_student_competitive_info(
 
     department = db.query(Department).filter(Department.id == main_application.department_id).first()
     speciality = db.query(Speciality).filter(Speciality.id == main_application.speciality_id).first()
-    profile = db.query(Profile).filter(Profile.id == main_application.profile_id).first() if main_application.profile_id else None
+    profile = db.query(Profile).filter(
+        Profile.id == main_application.profile_id).first() if main_application.profile_id else None
 
     budget_places_free = None
     if main_application.budget_places_total and main_application.budget_places_filled:
@@ -1332,13 +1337,16 @@ async def web_get_group_statistics(
                 "min_score": profile.min_score or 0,
                 "max_score": profile.max_score or 0,
                 "budget": {"total": profile.budget_places or 0, "filled": profile.budget_filled or 0,
-                           "free": profile.budget_free or 0, "applicants_in_range": profile.budget_applicants_in_range or 0,
+                           "free": profile.budget_free or 0,
+                           "applicants_in_range": profile.budget_applicants_in_range or 0,
                            "applicants_with_consent": profile.budget_applicants_with_consent or 0,
                            "passing_score": profile.budget_passing_score or 0},
                 "paid": {"total": profile.paid_places or 0, "filled": profile.paid_filled or 0,
-                         "free": profile.paid_free or 0, "applicants_with_consent": profile.paid_applicants_with_consent or 0},
+                         "free": profile.paid_free or 0,
+                         "applicants_with_consent": profile.paid_applicants_with_consent or 0},
                 "target": {"total": profile.target_places or 0, "filled": profile.target_filled or 0,
-                           "free": profile.target_free or 0, "applicants_with_consent": profile.target_applicants_with_consent or 0},
+                           "free": profile.target_free or 0,
+                           "applicants_with_consent": profile.target_applicants_with_consent or 0},
                 "competition": profile.competition or 0,
                 "passing_score_current": profile.passing_score_current or 0,
                 "passing_score_last_year": profile.passing_score_last_year or 0
