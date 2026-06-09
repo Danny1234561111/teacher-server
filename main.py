@@ -1,27 +1,22 @@
 # main.py
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
-import os
 
-# Импортируем роутеры из папки routers (не api.routes)
-from routers import auth, admin, students, user_contact, excel_import
-from database.database import init_db, get_db
+# Импортируем роутеры
+from routers import auth, admin, students, user_contact
+from database.database import init_db
 from services.scheduler import scheduler
 from services.auth_service import AuthService
-from services.websocket_manager import websocket_manager, handle_mobile_websocket
+from services.websocket_manager import handle_mobile_websocket
+from routers import excel_import
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 auth_service = AuthService()
-
-ALLOWED_ORIGINS = os.getenv(
-    "ALLOWED_ORIGINS",
-    "http://localhost:3000,http://localhost:5173,http://localhost:8080,http://158.160.67.3:3000,http://158.160.67.3:5173"
-).split(",")
 
 
 @asynccontextmanager
@@ -62,10 +57,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS - настройки для поддержки cookies
+# CORS - настройки
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -76,83 +71,30 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(students.router, prefix="/api/students", tags=["Students"])
 app.include_router(user_contact.router, prefix="/api/user/contact", tags=["User Contact"])
-app.include_router(excel_import.router, prefix="/api/excel-import", tags=["Excel Import"])
+app.include_router(excel_import.router,prefix="/api/excel-import",)
 
 
 # ===== WEBSOCKET ЭНДПОИНТ =====
 @app.websocket("/ws/mobile/{token}")
 async def websocket_mobile_endpoint(websocket: WebSocket, token: str):
     """WebSocket для мобильного приложения"""
-    db = None
-    user_id = None
-
-    logger.info(f"🔌 Новое WebSocket соединение")
+    from database.database import get_db
+    db = next(get_db())
 
     try:
-        # Создаем сессию БД
-        db = next(get_db())
-
-        # Декодируем токен
-        try:
-            payload = auth_service.decode_token(token)
-            user_id = payload.get('sub')
-
-            if not user_id:
-                logger.error(f"❌ WebSocket: В токене нет поля 'sub'")
-                await websocket.close(code=1008, reason="Invalid token: missing user id")
-                return
-
-            logger.info(f"✅ WebSocket: Токен декодирован, user_id={user_id}")
-
-        except ValueError as e:
-            error_msg = str(e)
-            logger.error(f"❌ WebSocket: Ошибка декодирования токена: {error_msg}")
-            await websocket.close(code=1008, reason=f"Invalid token: {error_msg}")
-            return
-        except Exception as e:
-            logger.error(f"❌ WebSocket: Неожиданная ошибка при декодировании: {e}", exc_info=True)
-            await websocket.close(code=1011, reason="Internal error")
+        user_data = auth_service.get_user_by_token(token, db)
+        if not user_data:
+            await websocket.close(code=1008, reason="Invalid token")
             return
 
-        # Проверяем пользователя в БД
-        try:
-            user_data = auth_service.get_user_by_token(token, db)
-            if not user_data:
-                logger.error(f"❌ WebSocket: Пользователь с id={user_id} не найден")
-                await websocket.close(code=1008, reason="User not found")
-                return
-
-            if not user_data.get('is_active', False):
-                logger.error(f"❌ WebSocket: Пользователь {user_id} неактивен")
-                await websocket.close(code=1008, reason="User is inactive")
-                return
-
-            logger.info(f"✅ WebSocket: Пользователь {user_id} найден и активен")
-
-        except ValueError as e:
-            logger.error(f"❌ WebSocket: Ошибка получения пользователя: {e}")
-            await websocket.close(code=1008, reason=str(e))
-            return
-        except Exception as e:
-            logger.error(f"❌ WebSocket: Неожиданная ошибка при получении пользователя: {e}", exc_info=True)
-            await websocket.close(code=1011, reason="Internal error")
-            return
-
-        # Передаем управление обработчику WebSocket
-        logger.info(f"🚀 Передача управления обработчику WebSocket для user_id={user_id}")
+        user_id = user_data['id']
         await handle_mobile_websocket(websocket, user_id)
 
-    except WebSocketDisconnect:
-        logger.info(f"🔌 WebSocket разрыв соединения")
     except Exception as e:
-        logger.error(f"💥 Критическая ошибка в WebSocket эндпоинте: {e}", exc_info=True)
-        try:
-            await websocket.close(code=1011, reason="Internal server error")
-        except:
-            pass
+        logger.error(f"Ошибка WebSocket: {e}")
+        await websocket.close(code=1011, reason="Internal error")
     finally:
-        if db:
-            db.close()
+        db.close()
 
 
 @app.get("/")
@@ -162,10 +104,6 @@ async def root():
         "version": "5.0.0",
         "status": "running",
         "database": "initialized",
-        "cors": {
-            "allowed_origins": ALLOWED_ORIGINS,
-            "credentials_supported": True
-        },
         "websocket": {
             "mobile": "ws://localhost:8000/ws/mobile/{token}"
         },
@@ -174,8 +112,7 @@ async def root():
             "interval_hours": scheduler.interval_hours,
             "last_run": scheduler.last_run.isoformat() if scheduler.last_run else None,
             "last_stats": scheduler.last_stats
-        },
-        "active_connections": websocket_manager.get_connection_count() if hasattr(websocket_manager, 'get_connection_count') else 0
+        }
     }
 
 
@@ -185,7 +122,6 @@ async def health_check():
         "status": "healthy",
         "database": "connected",
         "parser": "running" if scheduler.is_running else "stopped",
-        "websocket_connections": websocket_manager.get_connection_count() if hasattr(websocket_manager, 'get_connection_count') else 0,
         "version": "5.0.0"
     }
 
