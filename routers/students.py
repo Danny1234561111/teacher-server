@@ -496,14 +496,29 @@ async def get_current_user_mobile(
     return user
 
 
+# api/routes/students.py - замените функцию get_current_user_web и web_get_students
+
 async def get_current_user_web(
         request: Request,
         db: Session = Depends(get_db)
 ) -> User:
-    user_data = auth_service.get_current_user_web(request, db)
+    """Получение пользователя из cookie для веб-версии"""
+    token = request.cookies.get("access_token")
+
+    if not token:
+        # Пробуем взять из Authorization header
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "")
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Токен не найден")
+
+    user_data = auth_service.get_user_by_token(token, db)
     user = db.query(User).filter(User.id == user_data['id']).first()
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
+
     return user
 
 
@@ -570,20 +585,118 @@ async def web_get_students(
         documents_status: Optional[str] = None,
         db: Session = Depends(get_db)
 ):
-    # Получаем пользователя из cookie (как get_current_user_mobile получает из Bearer)
     current_user = await get_current_user_web(request, db)
 
-    # ТОЧНО ТАКОЙ ЖЕ ВЫЗОВ student_service
-    students = student_service.get_available_students(
-        user_id=current_user.id, db=db, skip=skip, limit=limit,
-        status=status, application_status=application_status, contact_status=contact_status,
-        consent_status=consent_status, department_id=department_id, speciality_id=speciality_id,
-        study_form=study_form, study_basis=study_basis, search=search,
-        meeting_status=meeting_status, call_status=call_status,
-        decision_status=decision_status, documents_status=documents_status
-    )
-    return {"total": len(students), "students": students}
+    # Проверка роли
+    user_role = current_user.role
+    if hasattr(user_role, 'value'):
+        user_role = user_role.value
 
+    # Если не админ - ограничиваем
+    query = db.query(Student)
+    if user_role != 'admin' and user_role != 'ADMIN':
+        query = query.filter(Student.kurator_id == current_user.id)
+
+    # Применяем фильтры
+    if search:
+        query = query.filter(Student.full_name.ilike(f"%{search}%"))
+
+    if department_id:
+        query = query.filter(Student.department_id == department_id)
+
+    if speciality_id:
+        query = query.filter(Student.speciality_id == speciality_id)
+
+    if status:
+        try:
+            query = query.filter(Student.status == StudentStatus(status))
+        except ValueError:
+            pass
+
+    if meeting_status:
+        try:
+            query = query.filter(Student.meeting_status == MeetingStatus(meeting_status.upper()))
+        except ValueError:
+            pass
+
+    if call_status:
+        try:
+            query = query.filter(Student.call_status == CallStatus(call_status.upper()))
+        except ValueError:
+            pass
+
+    if decision_status:
+        try:
+            query = query.filter(Student.decision_status == DecisionStatus(decision_status.upper()))
+        except ValueError:
+            pass
+
+    if documents_status:
+        try:
+            query = query.filter(Student.documents_status == DocumentsStatus(documents_status.upper()))
+        except ValueError:
+            pass
+
+    if contact_status:
+        try:
+            query = query.filter(Student.contact_status == ContactStatus(contact_status.upper()))
+        except ValueError:
+            pass
+
+    total = query.count()
+    students_list = query.offset(skip).limit(limit).all()
+
+    result = []
+    for s in students_list:
+        department_name = None
+        if s.department_id:
+            dept = db.query(Department).filter(Department.id == s.department_id).first()
+            department_name = dept.name if dept else None
+
+        speciality_name = None
+        if s.speciality_id:
+            spec = db.query(Speciality).filter(Speciality.id == s.speciality_id).first()
+            speciality_name = spec.name if spec else None
+
+        main_application = db.query(StudentApplication).filter(
+            StudentApplication.student_id == s.id
+        ).order_by(StudentApplication.priority.asc(), StudentApplication.id.asc()).first()
+
+        result.append(StudentResponse(
+            id=s.id,
+            russian_student_id=s.russian_student_id,
+            full_name=s.full_name,
+            phone=s.phone,
+            additional_contacts=s.additional_contacts,
+            prior_contact=s.prior_contact.value if s.prior_contact else None,
+            department_id=s.department_id,
+            department_name=department_name,
+            speciality_id=s.speciality_id,
+            speciality_name=speciality_name,
+            profile_id=s.profile_id,
+            profile_name=None,
+            study_level=s.study_level.value if s.study_level else None,
+            study_form=s.study_form.value if s.study_form else None,
+            study_basis=s.study_basis.value if s.study_basis else None,
+            status=s.status.value if s.status else None,
+            application_status=main_application.application_status.value if main_application and main_application.application_status else None,
+            contact_status=s.contact_status.value if s.contact_status else None,
+            contact_type=s.contact_type.value if s.contact_type else None,
+            consent_status=main_application.consent_status if main_application else None,
+            total_score=main_application.total_score if main_application else None,
+            position=main_application.position if main_application else None,
+            last_communication=s.last_communication_date,
+            last_communication_note=None,
+            kurator_id=s.kurator_id,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+            meeting_status=s.meeting_status.value if s.meeting_status else "UNKNOWN",
+            call_status=s.call_status.value if s.call_status else "UNKNOWN",
+            decision_status=s.decision_status.value if s.decision_status else "UNKNOWN",
+            documents_status=s.documents_status.value if s.documents_status else "NOT_SUBMITTED"
+        ))
+
+    return {"total": total, "students": result}
 
 
 
