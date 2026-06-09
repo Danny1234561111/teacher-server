@@ -1,5 +1,5 @@
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Set
@@ -29,25 +29,43 @@ class ExcelImportResponse(BaseModel):
     duplicates_found: Optional[List[Dict[str, Any]]] = None
 
 
-async def get_current_user(
-        credentials: HTTPAuthorizationCredentials = Depends(security),
+async def get_current_user_universal(
+        request: Request,
+        credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
         db: Session = Depends(get_db)
 ) -> User:
-    token = credentials.credentials
-    user_data = auth_service.get_user_by_token(token, db)
-    user = db.query(User).filter(User.id == user_data['id']).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
-    return user
+    """Универсальная аутентификация: Bearer (мобилка) или Cookie (веб)"""
+    token = None
+
+    # 1. Пробуем Bearer token (мобильное приложение)
+    if credentials and credentials.credentials:
+        token = credentials.credentials
+
+    # 2. Если нет Bearer, пробуем Cookie (веб-приложение)
+    if not token:
+        token = request.cookies.get("access_token")
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Токен не найден")
+
+    try:
+        user_data = auth_service.get_user_by_token(token, db)
+        user = db.query(User).filter(User.id == user_data['id']).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
 
 
 @router.post("/upload", response_model=ExcelImportResponse)
 async def import_students_from_excel(
+        request: Request,
         file: UploadFile = File(..., description="Excel файл с данными абитуриентов"),
         create_missing_profiles: bool = Form(False),
         duplicate_strategy: str = Form("skip", description="skip, replace_all, replace_selected"),
         replace_ids: Optional[str] = Form(None, description='JSON строка со списком ID, например "[123, 456]"'),
-        current_user: User = Depends(get_current_user),
+        current_user: User = Depends(get_current_user_universal),
         db: Session = Depends(get_db)
 ):
     try:
