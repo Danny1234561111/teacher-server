@@ -10,7 +10,7 @@ from services.communication_service import CommunicationService
 from services.auth_service import AuthService
 from database.database import get_db
 from database.schema import User, Department, Speciality, Profile, StudentApplication, ApplicationStatus, Student, \
-    StudyForm, UserRole, StudyBasis, StudyLevel, MeetingStatus, CallStatus, DecisionStatus, DocumentsStatus
+    StudyForm, UserRole, StudyBasis, StudyLevel
 
 router = APIRouter(prefix="", tags=["Students"])
 security = HTTPBearer()
@@ -43,15 +43,9 @@ class ContactStatus(str):
         value_upper = value.upper()
         if value_upper in cls.get_valid_values():
             return value_upper
-        mapping = {
-            'STRING': cls.NEW,
-            'NEW': cls.NEW,
-            'MET': cls.MET,
-            'INTERESTED': cls.INTERESTED,
-            'ORIGINAL_SUBMITTED': cls.ORIGINAL_SUBMITTED,
-            'WAITING_ORIGINAL': cls.WAITING_ORIGINAL,
-            'NOT_INTERESTED': cls.NOT_INTERESTED,
-        }
+        mapping = {'STRING': cls.NEW, 'NEW': cls.NEW, 'MET': cls.MET, 'INTERESTED': cls.INTERESTED,
+                   'ORIGINAL_SUBMITTED': cls.ORIGINAL_SUBMITTED, 'WAITING_ORIGINAL': cls.WAITING_ORIGINAL,
+                   'NOT_INTERESTED': cls.NOT_INTERESTED}
         return mapping.get(value_upper, value_upper)
 
 
@@ -150,15 +144,8 @@ class CommunicationType(str):
         value_upper = value.upper()
         if value_upper in cls.get_valid_values():
             return value_upper
-        mapping = {
-            'CALL': cls.CALL,
-            'MEETING': cls.MEETING,
-            'EMAIL': cls.EMAIL,
-            'MESSAGE': cls.MESSAGE,
-            'PHONE': cls.CALL,
-            'PHONE_CALL': cls.CALL,
-            'SMS': cls.MESSAGE,
-        }
+        mapping = {'CALL': cls.CALL, 'MEETING': cls.MEETING, 'EMAIL': cls.EMAIL, 'MESSAGE': cls.MESSAGE,
+                   'PHONE': cls.CALL, 'PHONE_CALL': cls.CALL, 'SMS': cls.MESSAGE}
         return mapping.get(value_upper, value_upper)
 
 
@@ -179,16 +166,8 @@ class CommunicationStatus(str):
         value_lower = value.lower()
         if value_lower in cls.get_valid_values():
             return value_lower
-        mapping = {
-            'planned': cls.PLANNED,
-            'completed': cls.COMPLETED,
-            'cancelled': cls.CANCELLED,
-            'missed': cls.MISSED,
-            'COMPLETED': cls.COMPLETED,
-            'PLANNED': cls.PLANNED,
-            'CANCELLED': cls.CANCELLED,
-            'MISSED': cls.MISSED,
-        }
+        mapping = {'planned': cls.PLANNED, 'completed': cls.COMPLETED, 'cancelled': cls.CANCELLED, 'missed': cls.MISSED,
+                   'COMPLETED': cls.COMPLETED, 'PLANNED': cls.PLANNED, 'CANCELLED': cls.CANCELLED, 'MISSED': cls.MISSED}
         return mapping.get(value_lower, value_lower)
 
 
@@ -208,33 +187,6 @@ class StudentCreate(BaseModel):
         if not v or len(v.strip()) < 2:
             raise ValueError('ФИО должно содержать минимум 2 символа')
         return v.strip()
-
-    @field_validator('study_level')
-    @classmethod
-    def validate_study_level(cls, v):
-        if v:
-            valid_values = [level.value for level in StudyLevel]
-            if v not in valid_values:
-                raise ValueError(f"Недопустимый уровень. Допустимые: {', '.join(valid_values)}")
-        return v
-
-    @field_validator('study_form')
-    @classmethod
-    def validate_study_form(cls, v):
-        if v:
-            valid_values = [form.value for form in StudyForm]
-            if v not in valid_values:
-                raise ValueError(f"Недопустимая форма. Допустимые: {', '.join(valid_values)}")
-        return v
-
-    @field_validator('study_basis')
-    @classmethod
-    def validate_study_basis(cls, v):
-        if v:
-            valid_values = [basis.value for basis in StudyBasis]
-            if v not in valid_values:
-                raise ValueError(f"Недопустимая основа. Допустимые: {', '.join(valid_values)}")
-        return v
 
 
 class StudentUpdate(BaseModel):
@@ -259,56 +211,6 @@ class StudentUpdate(BaseModel):
     call_status: Optional[str] = None
     decision_status: Optional[str] = None
     documents_status: Optional[str] = None
-
-    @field_validator('contact_status')
-    @classmethod
-    def validate_contact_status(cls, v):
-        if v:
-            normalized = ContactStatus.normalize(v)
-            if normalized not in ContactStatus.get_valid_values():
-                raise ValueError(f"Недопустимый статус контакта")
-            return normalized
-        return v
-
-    @field_validator('meeting_status')
-    @classmethod
-    def validate_meeting_status(cls, v):
-        if v:
-            normalized = MeetingStatusEnum.normalize(v)
-            if normalized not in MeetingStatusEnum.get_valid_values():
-                raise ValueError(f"Недопустимый статус встречи")
-            return normalized
-        return v
-
-    @field_validator('call_status')
-    @classmethod
-    def validate_call_status(cls, v):
-        if v:
-            normalized = CallStatusEnum.normalize(v)
-            if normalized not in CallStatusEnum.get_valid_values():
-                raise ValueError(f"Недопустимый статус дозвона")
-            return normalized
-        return v
-
-    @field_validator('decision_status')
-    @classmethod
-    def validate_decision_status(cls, v):
-        if v:
-            normalized = DecisionStatusEnum.normalize(v)
-            if normalized not in DecisionStatusEnum.get_valid_values():
-                raise ValueError(f"Недопустимый статус решения")
-            return normalized
-        return v
-
-    @field_validator('documents_status')
-    @classmethod
-    def validate_documents_status(cls, v):
-        if v:
-            normalized = DocumentsStatusEnum.normalize(v)
-            if normalized not in DocumentsStatusEnum.get_valid_values():
-                raise ValueError(f"Недопустимый статус документов")
-            return normalized
-        return v
 
 
 class StudentResponse(BaseModel):
@@ -367,43 +269,14 @@ class StudentApplicationResponse(BaseModel):
     total_score: Optional[int] = None
     application_status: Optional[str] = None
     consent_status: Optional[bool] = None
-    participation: Optional[bool] = None
-    is_main_contest: Optional[bool] = None
     study_form: Optional[str] = None
     study_basis: Optional[str] = None
     study_level: Optional[str] = None
-    budget_places_total: Optional[int] = None
-    budget_places_filled: Optional[int] = None
-    paid_places_total: Optional[int] = None
-    paid_places_filled: Optional[int] = None
-    target_places_total: Optional[int] = None
-    target_places_filled: Optional[int] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-
-
-class CompetitiveInfoResponse(BaseModel):
-    position: Optional[int]
-    total_students: int
-    total_enrolled: int
-    total_submitted: int
-    average_score: float
-    min_score: int
-    max_score: int
-    passing_score: Optional[int]
-    student_score: Optional[int]
-    department_name: Optional[str]
-    speciality_name: Optional[str]
-    profile_name: Optional[str]
-    study_form: Optional[str] = None
-    study_basis: Optional[str] = None
-    budget_places_total: Optional[int] = None
-    budget_places_filled: Optional[int] = None
-    budget_places_free: Optional[int] = None
-    competition: Optional[float] = None
 
 
 class GroupStatisticsResponse(BaseModel):
@@ -433,26 +306,6 @@ class CommunicationCreate(BaseModel):
     notes: Optional[str] = None
     contact_status: Optional[str] = None
 
-    @field_validator('communication_type')
-    @classmethod
-    def validate_communication_type(cls, v):
-        if v:
-            normalized = CommunicationType.normalize(v)
-            if normalized not in CommunicationType.get_valid_values():
-                raise ValueError(f"Недопустимый тип коммуникации")
-            return normalized
-        return v
-
-    @field_validator('status')
-    @classmethod
-    def validate_status(cls, v):
-        if v:
-            normalized = CommunicationStatus.normalize(v)
-            if normalized not in CommunicationStatus.get_valid_values():
-                raise ValueError(f"Недопустимый статус")
-            return normalized
-        return 'completed'
-
 
 class CommunicationUpdate(BaseModel):
     communication_type: Optional[str] = None
@@ -477,14 +330,6 @@ class CommunicationResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class CommunicationStatsResponse(BaseModel):
-    total_communications: int
-    by_type: dict
-    contact_status_distribution: Optional[dict] = {}
-    recent_communications: List[CommunicationResponse]
-    period_days: int
 
 
 # ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
@@ -567,10 +412,6 @@ async def get_student_applications_mobile(
     if not student:
         raise HTTPException(status_code=404, detail="Абитуриент не найден")
 
-    user = db.query(User).filter(User.id == current_user.id).first()
-    if user.role != UserRole.ADMIN and student.kurator_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
-
     applications = db.query(StudentApplication).filter(StudentApplication.student_id == student_id).all()
     result = []
     for app in applications:
@@ -585,14 +426,9 @@ async def get_student_applications_mobile(
             position=app.position, priority=app.priority, total_score=app.total_score,
             application_status=app.application_status.value if app.application_status else None,
             consent_status=app.consent_status if app.consent_status is not None else False,
-            participation=app.participation if app.participation is not None else True,
-            is_main_contest=app.is_main_contest if app.is_main_contest is not None else False,
             study_form=app.study_form.value if app.study_form else None,
             study_basis=app.study_basis.value if app.study_basis else None,
             study_level=app.study_level.value if app.study_level else None,
-            budget_places_total=app.budget_places_total, budget_places_filled=app.budget_places_filled,
-            paid_places_total=app.paid_places_total, paid_places_filled=app.paid_places_filled,
-            target_places_total=app.target_places_total, target_places_filled=app.target_places_filled,
             created_at=app.created_at, updated_at=app.updated_at
         ))
     return result
@@ -693,14 +529,7 @@ async def get_group_statistics_mobile(
             Profile.name == group_config['profile_name'],
             Profile.speciality_id == speciality.id
         ).first()
-        if not profile:
-            from services.parser_service import ParserService
-            parser = ParserService(db)
-            data = parser.fetch_group_data(group_config['uid'])
-            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
-            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
-            profile_id = None
-        else:
+        if profile:
             stats = {
                 "total_applications": profile.total_applications or 0,
                 "applications_submitted": profile.applications_submitted or 0,
@@ -710,7 +539,6 @@ async def get_group_statistics_mobile(
                 "max_score": profile.max_score or 0,
                 "budget": {"total": profile.budget_places or 0, "filled": profile.budget_filled or 0,
                            "free": profile.budget_free or 0,
-                           "applicants_in_range": profile.budget_applicants_in_range or 0,
                            "applicants_with_consent": profile.budget_applicants_with_consent or 0,
                            "passing_score": profile.budget_passing_score or 0},
                 "paid": {"total": profile.paid_places or 0, "filled": profile.paid_filled or 0,
@@ -724,6 +552,13 @@ async def get_group_statistics_mobile(
                 "passing_score_last_year": profile.passing_score_last_year or 0
             }
             profile_id = profile.id
+        else:
+            from services.parser_service import ParserService
+            parser = ParserService(db)
+            data = parser.fetch_group_data(group_config['uid'])
+            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
+            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
+            profile_id = None
         results.append(GroupStatisticsResponse(
             group_name=group_config['name'], profile_id=profile_id,
             study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
@@ -795,10 +630,6 @@ async def web_get_student_applications(
     if not student:
         raise HTTPException(status_code=404, detail="Абитуриент не найден")
 
-    user = db.query(User).filter(User.id == current_user.id).first()
-    if user.role != UserRole.ADMIN and student.kurator_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
-
     applications = db.query(StudentApplication).filter(StudentApplication.student_id == student_id).all()
     result = []
     for app in applications:
@@ -813,14 +644,9 @@ async def web_get_student_applications(
             position=app.position, priority=app.priority, total_score=app.total_score,
             application_status=app.application_status.value if app.application_status else None,
             consent_status=app.consent_status if app.consent_status is not None else False,
-            participation=app.participation if app.participation is not None else True,
-            is_main_contest=app.is_main_contest if app.is_main_contest is not None else False,
             study_form=app.study_form.value if app.study_form else None,
             study_basis=app.study_basis.value if app.study_basis else None,
             study_level=app.study_level.value if app.study_level else None,
-            budget_places_total=app.budget_places_total, budget_places_filled=app.budget_places_filled,
-            paid_places_total=app.paid_places_total, paid_places_filled=app.paid_places_filled,
-            target_places_total=app.target_places_total, target_places_filled=app.target_places_filled,
             created_at=app.created_at, updated_at=app.updated_at
         ))
     return result
@@ -927,14 +753,7 @@ async def web_get_group_statistics(
             Profile.name == group_config['profile_name'],
             Profile.speciality_id == speciality.id
         ).first()
-        if not profile:
-            from services.parser_service import ParserService
-            parser = ParserService(db)
-            data = parser.fetch_group_data(group_config['uid'])
-            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
-            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
-            profile_id = None
-        else:
+        if profile:
             stats = {
                 "total_applications": profile.total_applications or 0,
                 "applications_submitted": profile.applications_submitted or 0,
@@ -944,7 +763,6 @@ async def web_get_group_statistics(
                 "max_score": profile.max_score or 0,
                 "budget": {"total": profile.budget_places or 0, "filled": profile.budget_filled or 0,
                            "free": profile.budget_free or 0,
-                           "applicants_in_range": profile.budget_applicants_in_range or 0,
                            "applicants_with_consent": profile.budget_applicants_with_consent or 0,
                            "passing_score": profile.budget_passing_score or 0},
                 "paid": {"total": profile.paid_places or 0, "filled": profile.paid_filled or 0,
@@ -958,6 +776,13 @@ async def web_get_group_statistics(
                 "passing_score_last_year": profile.passing_score_last_year or 0
             }
             profile_id = profile.id
+        else:
+            from services.parser_service import ParserService
+            parser = ParserService(db)
+            data = parser.fetch_group_data(group_config['uid'])
+            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
+            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
+            profile_id = None
         results.append(GroupStatisticsResponse(
             group_name=group_config['name'], profile_id=profile_id,
             study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
@@ -969,47 +794,3 @@ async def web_get_group_statistics(
             passing_score_last_year=stats['passing_score_last_year']
         ))
     return results
-
-
-@router.put("/web/communications/{comm_id}", response_model=CommunicationResponse)
-async def web_update_communication(
-        request: Request,
-        comm_id: int,
-        comm_data: CommunicationUpdate,
-        db: Session = Depends(get_db)
-):
-    current_user = await get_current_user_web(request, db)
-    communication = communication_service.update_communication(
-        communication_id=comm_id, update_data=comm_data.dict(exclude_unset=True),
-        user_id=current_user.id, db=db
-    )
-    if not communication:
-        raise HTTPException(status_code=404, detail="Коммуникация не найдена")
-    return communication
-
-
-@router.delete("/web/communications/{comm_id}")
-async def web_delete_communication(
-        request: Request,
-        comm_id: int,
-        db: Session = Depends(get_db)
-):
-    current_user = await get_current_user_web(request, db)
-    deleted = communication_service.delete_communication(
-        communication_id=comm_id, user_id=current_user.id, db=db
-    )
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Коммуникация не найдена")
-    return {"message": "Коммуникация успешно удалена"}
-
-
-@router.get("/web/communications/stats", response_model=CommunicationStatsResponse)
-async def web_get_communication_stats(
-        request: Request,
-        days_back: int = Query(30, ge=1, le=365),
-        db: Session = Depends(get_db)
-):
-    current_user = await get_current_user_web(request, db)
-    return communication_service.get_communication_stats(
-        user_id=current_user.id, db=db, days_back=days_back
-    )
