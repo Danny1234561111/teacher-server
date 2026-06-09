@@ -79,6 +79,7 @@ app.include_router(students.router, prefix="/api/students", tags=["Students"])
 app.include_router(communication.router, prefix="/api/user/contact", tags=["User Contact"])
 app.include_router(excel_import.router, prefix="/api/excel-import", tags=["Excel Import"])
 
+# main.py (только WebSocket часть, остальное без изменений)
 
 # ===== WEBSOCKET ЭНДПОИНТ =====
 @app.websocket("/ws/mobile/{token}")
@@ -87,71 +88,74 @@ async def websocket_mobile_endpoint(websocket: WebSocket, token: str):
     db = None
     user_id = None
 
+    logger.info(f"🔌 Новое WebSocket соединение с токеном: {token[:50]}...")
+
     try:
         # Создаем сессию БД
         db = next(get_db())
 
-        # Декодируем токен для получения user_id
+        # Декодируем токен
         try:
             payload = auth_service.decode_token(token)
             user_id = payload.get('sub')
 
             if not user_id:
-                logger.error(f"WebSocket: В токене нет sub поля")
+                logger.error(f"❌ WebSocket: В токене нет поля 'sub'")
                 await websocket.close(code=1008, reason="Invalid token: missing user id")
                 return
 
+            logger.info(f"✅ WebSocket: Токен декодирован, user_id={user_id}")
+
         except ValueError as e:
-            logger.error(f"WebSocket: Ошибка декодирования токена: {e}")
-            await websocket.close(code=1008, reason=f"Invalid token: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"❌ WebSocket: Ошибка декодирования токена: {error_msg}")
+            await websocket.close(code=1008, reason=f"Invalid token: {error_msg}")
             return
         except Exception as e:
-            logger.error(f"WebSocket: Неожиданная ошибка при декодировании: {e}")
+            logger.error(f"❌ WebSocket: Неожиданная ошибка при декодировании: {e}", exc_info=True)
             await websocket.close(code=1011, reason="Internal error")
             return
 
-        # Проверяем существование пользователя в БД
+        # Проверяем пользователя в БД
         try:
             user_data = auth_service.get_user_by_token(token, db)
             if not user_data:
-                logger.error(f"WebSocket: Пользователь с id={user_id} не найден в БД")
+                logger.error(f"❌ WebSocket: Пользователь с id={user_id} не найден")
                 await websocket.close(code=1008, reason="User not found")
                 return
 
-            # Проверяем активность пользователя
             if not user_data.get('is_active', False):
-                logger.error(f"WebSocket: Пользователь {user_id} неактивен")
+                logger.error(f"❌ WebSocket: Пользователь {user_id} неактивен")
                 await websocket.close(code=1008, reason="User is inactive")
                 return
 
+            logger.info(f"✅ WebSocket: Пользователь {user_id} ({user_data.get('email')}) найден и активен")
+
         except ValueError as e:
-            logger.error(f"WebSocket: Ошибка получения пользователя: {e}")
+            logger.error(f"❌ WebSocket: Ошибка получения пользователя: {e}")
             await websocket.close(code=1008, reason=str(e))
             return
         except Exception as e:
-            logger.error(f"WebSocket: Неожиданная ошибка при получении пользователя: {e}")
+            logger.error(f"❌ WebSocket: Неожиданная ошибка при получении пользователя: {e}", exc_info=True)
             await websocket.close(code=1011, reason="Internal error")
             return
 
-        # Успешное подключение
-        logger.info(f"✅ WebSocket: Пользователь {user_id} успешно подключился")
+        # Передаем управление обработчику WebSocket (он сам примет соединение)
+        logger.info(f"🚀 Передача управления обработчику WebSocket для user_id={user_id}")
         await handle_mobile_websocket(websocket, user_id)
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket: Пользователь {user_id} отключился")
+        logger.info(f"🔌 WebSocket разрыв соединения (ранний) для user_id={user_id}")
     except Exception as e:
-        logger.error(f"WebSocket: Критическая ошибка: {e}", exc_info=True)
+        logger.error(f"💥 Критическая ошибка в WebSocket эндпоинте: {e}", exc_info=True)
         try:
             await websocket.close(code=1011, reason="Internal server error")
         except:
             pass
     finally:
-        # Закрываем соединение с БД
         if db:
             db.close()
-        # Удаляем пользователя из менеджера подключений
-        if user_id:
-            websocket_manager.disconnect(user_id)
+            logger.debug(f"🔒 Сессия БД закрыта для user_id={user_id}")
 
 
 @app.get("/")
