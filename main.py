@@ -5,13 +5,12 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-# Импортируем роутеры
-from routers import auth, admin, students, user_contact
+# Импортируем роутеры (правильные пути)
+from api.routes import auth, admin, students, communication, excel_import
 from database.database import init_db
 from services.scheduler import scheduler
 from services.auth_service import AuthService
 from services.websocket_manager import handle_mobile_websocket
-from routers import excel_import
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -76,7 +75,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(students.router, prefix="/api/students", tags=["Students"])
-app.include_router(user_contact.router, prefix="/api/user/contact", tags=["User Contact"])
+app.include_router(communication.router, prefix="/api/user/contact", tags=["User Contact"])
 app.include_router(excel_import.router, prefix="/api/excel-import", tags=["Excel Import"])
 
 

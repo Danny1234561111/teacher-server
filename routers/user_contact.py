@@ -639,3 +639,246 @@ async def web_make_call(
             message="Не удалось отправить команду",
             student_name=student['full_name']
         )
+
+
+# api/routes/communication.py (добавить в конец файла)
+
+@router.post("/web/sms", response_model=CommunicationResponse)
+async def web_send_sms(
+        request: Request,
+        request_data: SmsRequest,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+
+    student = await get_student_by_id(request_data.student_id, db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Студент не найден")
+
+    if not websocket_manager.is_connected(current_user.id):
+        return CommunicationResponse(
+            success=False,
+            action="sms",
+            target_device="mobile",
+            message="Мобильное устройство не подключено",
+            student_name=student['full_name'],
+            fallback=f"smsto:{request_data.phone_number}:{request_data.message_text or 'Здравствуйте!'}"
+        )
+
+    command = {
+        "type": "send_sms",
+        "action": "sms",
+        "student_id": student['id'],
+        "student_name": student['full_name'],
+        "phone_number": request_data.phone_number,
+        "message_text": request_data.message_text or f"Здравствуйте, {student['full_name']}!"
+    }
+
+    sent = await websocket_manager.send_command(current_user.id, command)
+
+    if sent:
+        return CommunicationResponse(
+            success=True,
+            action="sms",
+            target_device="mobile",
+            message="SMS отправлена через телефон",
+            student_name=student['full_name']
+        )
+    else:
+        return CommunicationResponse(
+            success=False,
+            action="sms",
+            target_device="mobile",
+            message="Не удалось отправить SMS",
+            student_name=student['full_name']
+        )
+
+
+@router.post("/web/telegram", response_model=CommunicationResponse)
+async def web_open_telegram(
+        request: Request,
+        request_data: TelegramRequest,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+
+    student = await get_student_by_id(request_data.student_id, db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Студент не найден")
+
+    target_device = determine_target_device('telegram', current_user)
+
+    if target_device == "mobile":
+        if not websocket_manager.is_connected(current_user.id):
+            telegram_url = f"https://t.me/{request_data.telegram_contact.replace('@', '')}"
+            return CommunicationResponse(
+                success=False,
+                action="telegram",
+                target_device="mobile",
+                message="Мобильное устройство не подключено",
+                student_name=student['full_name'],
+                fallback=telegram_url
+            )
+
+        command = {
+            "type": "open_telegram",
+            "action": "telegram",
+            "student_id": student['id'],
+            "student_name": student['full_name'],
+            "telegram_contact": request_data.telegram_contact,
+        }
+
+        sent = await websocket_manager.send_command(current_user.id, command)
+
+        if sent:
+            return CommunicationResponse(
+                success=True,
+                action="telegram",
+                target_device="mobile",
+                message="Telegram открыт на телефоне",
+                student_name=student['full_name']
+            )
+        else:
+            return CommunicationResponse(
+                success=False,
+                action="telegram",
+                target_device="mobile",
+                message="Не удалось открыть Telegram",
+                student_name=student['full_name']
+            )
+    else:
+        telegram_url = f"https://web.telegram.org/k/#@{request_data.telegram_contact.replace('@', '')}"
+        return CommunicationResponse(
+            success=True,
+            action="telegram",
+            target_device="pc",
+            message="Открыть Telegram в браузере",
+            student_name=student['full_name'],
+            data={"url": telegram_url}
+        )
+
+
+@router.post("/web/vk", response_model=CommunicationResponse)
+async def web_open_vk(
+        request: Request,
+        request_data: VkRequest,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+
+    student = await get_student_by_id(request_data.student_id, db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Студент не найден")
+
+    target_device = determine_target_device('vk', current_user)
+
+    if target_device == "mobile":
+        if not websocket_manager.is_connected(current_user.id):
+            vk_url = f"https://vk.com/{request_data.vk_contact}"
+            return CommunicationResponse(
+                success=False,
+                action="vk",
+                target_device="mobile",
+                message="Мобильное устройство не подключено",
+                student_name=student['full_name'],
+                fallback=vk_url
+            )
+
+        command = {
+            "type": "open_vk",
+            "action": "vk",
+            "student_id": student['id'],
+            "student_name": student['full_name'],
+            "vk_contact": request_data.vk_contact,
+        }
+
+        sent = await websocket_manager.send_command(current_user.id, command)
+
+        if sent:
+            return CommunicationResponse(
+                success=True,
+                action="vk",
+                target_device="mobile",
+                message="VK открыт на телефоне",
+                student_name=student['full_name']
+            )
+        else:
+            return CommunicationResponse(
+                success=False,
+                action="vk",
+                target_device="mobile",
+                message="Не удалось открыть VK",
+                student_name=student['full_name']
+            )
+    else:
+        vk_url = f"https://vk.com/{request_data.vk_contact}"
+        return CommunicationResponse(
+            success=True,
+            action="vk",
+            target_device="pc",
+            message="Открыть VK в браузере",
+            student_name=student['full_name'],
+            data={"url": vk_url}
+        )
+
+
+@router.post("/web/url", response_model=CommunicationResponse)
+async def web_open_url(
+        request: Request,
+        request_data: UrlRequest,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+
+    student = await get_student_by_id(request_data.student_id, db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Студент не найден")
+
+    target_device = determine_target_device('url', current_user)
+
+    if target_device == "mobile":
+        if not websocket_manager.is_connected(current_user.id):
+            return CommunicationResponse(
+                success=False,
+                action="url",
+                target_device="mobile",
+                message="Мобильное устройство не подключено",
+                student_name=student['full_name'],
+                fallback=request_data.url
+            )
+
+        command = {
+            "type": "open_url",
+            "action": "url",
+            "student_id": student['id'],
+            "student_name": student['full_name'],
+            "url": request_data.url,
+        }
+
+        sent = await websocket_manager.send_command(current_user.id, command)
+
+        if sent:
+            return CommunicationResponse(
+                success=True,
+                action="url",
+                target_device="mobile",
+                message="Ссылка открыта на телефоне",
+                student_name=student['full_name']
+            )
+        else:
+            return CommunicationResponse(
+                success=False,
+                action="url",
+                target_device="mobile",
+                message="Не удалось открыть ссылку",
+                student_name=student['full_name']
+            )
+    else:
+        return CommunicationResponse(
+            success=True,
+            action="url",
+            target_device="pc",
+            message="Открыть ссылку в браузере",
+            student_name=student['full_name'],
+            data={"url": request_data.url}
+        )

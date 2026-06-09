@@ -1,3 +1,4 @@
+# api/routes/auth.py - полный исправленный файл
 from fastapi import APIRouter, HTTPException, Depends, Response, Request
 from pydantic import BaseModel, EmailStr
 from typing import Optional, Dict, Any
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 from services.auth_service import AuthService
 from database.database import get_db
 
-router = APIRouter(tags=["authentication"])
+router = APIRouter(prefix="/auth", tags=["authentication"])
 auth_service = AuthService()
 
 
@@ -39,8 +40,10 @@ class LogoutResponse(BaseModel):
     message: str
 
 
-@router.post("/login", response_model=AuthResponse)
-async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+# ==================== МОБИЛЬНЫЕ ЭНДПОИНТЫ ====================
+
+@router.post("/mobile/login", response_model=AuthResponse)
+async def mobile_login(login_data: LoginRequest, db: Session = Depends(get_db)):
     try:
         result = auth_service.login_for_mobile(
             email=login_data.email,
@@ -55,8 +58,8 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
 
-@router.get("/me", response_model=UserResponse)
-async def get_current_user(token: str, db: Session = Depends(get_db)):
+@router.get("/mobile/me", response_model=UserResponse)
+async def mobile_get_current_user(token: str, db: Session = Depends(get_db)):
     try:
         user = auth_service.get_user_by_token(token, db)
         return user
@@ -66,6 +69,8 @@ async def get_current_user(token: str, db: Session = Depends(get_db)):
         print(f"Ошибка: {e}")
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
+
+# ==================== ВЕБ-ЭНДПОИНТЫ ====================
 
 @router.post("/web/login", response_model=WebAuthResponse)
 async def web_login(
