@@ -571,8 +571,8 @@ async def get_current_user_web(
     return user
 
 
-@router.get("/mobile", response_model=StudentListResponse)
-async def mobile_get_students(
+@router.get("", response_model=StudentListResponse)
+async def get_students_mobile(
         skip: int = Query(0, ge=0),
         limit: int = Query(100, ge=1, le=500),
         status: Optional[str] = None,
@@ -666,7 +666,7 @@ async def web_get_students(
 
 
 @router.get("/{student_id}", response_model=StudentResponse)
-async def mobile_get_student(
+async def get_student_mobile(
         student_id: int,
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
@@ -704,7 +704,7 @@ async def web_get_student(
 
 
 @router.get("/{student_id}/applications", response_model=List[StudentApplicationResponse])
-async def mobile_get_student_applications(
+async def get_student_applications_mobile(
         student_id: int,
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
@@ -818,7 +818,7 @@ async def web_get_student_applications(
 
 
 @router.get("/statistics/groups", response_model=List[GroupStatisticsResponse])
-async def mobile_get_group_statistics(
+async def get_group_statistics_mobile(
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
 ):
@@ -1005,8 +1005,8 @@ async def web_get_group_statistics(
     return results
 
 
-@router.post("/mobile", response_model=StudentResponse, status_code=201)
-async def mobile_create_student(
+@router.post("", response_model=StudentResponse, status_code=201)
+async def create_student_mobile(
         student_data: StudentCreate,
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
@@ -1039,7 +1039,7 @@ async def web_create_student(
 
 
 @router.put("/{student_id}", response_model=StudentResponse)
-async def mobile_update_student(
+async def update_student_mobile(
         student_id: int,
         student_data: StudentUpdate,
         current_user: User = Depends(get_current_user_mobile),
@@ -1090,7 +1090,7 @@ async def web_update_student(
 
 
 @router.delete("/{student_id}")
-async def mobile_delete_student(
+async def delete_student_mobile(
         student_id: int,
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
