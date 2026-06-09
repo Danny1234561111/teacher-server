@@ -1,4 +1,3 @@
-# api/routes/students.py
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator
@@ -19,6 +18,8 @@ auth_service = AuthService()
 student_service = StudentService()
 communication_service = CommunicationService()
 
+
+# ===== ENUM для валидации =====
 
 class ContactStatus(str):
     NEW = "NEW"
@@ -191,13 +192,15 @@ class CommunicationStatus(str):
         return mapping.get(value_lower, value_lower)
 
 
+# ===== МОДЕЛИ =====
+
 class StudentCreate(BaseModel):
-    full_name: str = Field(..., min_length=2, description="ФИО абитуриента")
-    russian_student_id: Optional[int] = Field(None, description="Российский ID студента (7 цифр)")
-    phone: Optional[str] = Field(None, description="Номер телефона")
-    study_level: Optional[str] = Field(None, description="Уровень подготовки (Бакалавриат/Магистратура)")
-    study_form: Optional[str] = Field(None, description="Форма обучения (Очная/Заочная)")
-    study_basis: Optional[str] = Field(None, description="Основа обучения (Бюджетная/Платная/Целевая)")
+    full_name: str = Field(..., min_length=2)
+    russian_student_id: Optional[int] = None
+    phone: Optional[str] = None
+    study_level: Optional[str] = None
+    study_form: Optional[str] = None
+    study_basis: Optional[str] = None
 
     @field_validator('full_name')
     @classmethod
@@ -263,8 +266,7 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = ContactStatus.normalize(v)
             if normalized not in ContactStatus.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый статус контакта. Допустимые: {', '.join(ContactStatus.get_valid_values())}")
+                raise ValueError(f"Недопустимый статус контакта")
             return normalized
         return v
 
@@ -274,8 +276,7 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = MeetingStatusEnum.normalize(v)
             if normalized not in MeetingStatusEnum.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый статус встречи. Допустимые: {', '.join(MeetingStatusEnum.get_valid_values())}")
+                raise ValueError(f"Недопустимый статус встречи")
             return normalized
         return v
 
@@ -285,8 +286,7 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = CallStatusEnum.normalize(v)
             if normalized not in CallStatusEnum.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый статус дозвона. Допустимые: {', '.join(CallStatusEnum.get_valid_values())}")
+                raise ValueError(f"Недопустимый статус дозвона")
             return normalized
         return v
 
@@ -296,8 +296,7 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = DecisionStatusEnum.normalize(v)
             if normalized not in DecisionStatusEnum.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый статус решения. Допустимые: {', '.join(DecisionStatusEnum.get_valid_values())}")
+                raise ValueError(f"Недопустимый статус решения")
             return normalized
         return v
 
@@ -307,36 +306,8 @@ class StudentUpdate(BaseModel):
         if v:
             normalized = DocumentsStatusEnum.normalize(v)
             if normalized not in DocumentsStatusEnum.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый статус документов. Допустимые: {', '.join(DocumentsStatusEnum.get_valid_values())}")
+                raise ValueError(f"Недопустимый статус документов")
             return normalized
-        return v
-
-    @field_validator('study_level')
-    @classmethod
-    def validate_study_level(cls, v):
-        if v:
-            valid_values = [level.value for level in StudyLevel]
-            if v not in valid_values:
-                raise ValueError(f"Недопустимый уровень. Допустимые: {', '.join(valid_values)}")
-        return v
-
-    @field_validator('study_form')
-    @classmethod
-    def validate_study_form(cls, v):
-        if v:
-            valid_values = [form.value for form in StudyForm]
-            if v not in valid_values:
-                raise ValueError(f"Недопустимая форма. Допустимые: {', '.join(valid_values)}")
-        return v
-
-    @field_validator('study_basis')
-    @classmethod
-    def validate_study_basis(cls, v):
-        if v:
-            valid_values = [basis.value for basis in StudyBasis]
-            if v not in valid_values:
-                raise ValueError(f"Недопустимая основа. Допустимые: {', '.join(valid_values)}")
         return v
 
 
@@ -455,52 +426,12 @@ class GroupStatisticsResponse(BaseModel):
 
 
 class CommunicationCreate(BaseModel):
-    communication_type: str = Field(..., description="Тип коммуникации")
-    status: Optional[str] = Field("completed", description="Статус коммуникации")
-    date_time: Optional[datetime] = Field(None, description="Дата и время")
-    duration_minutes: Optional[int] = Field(None, ge=1, le=480, description="Длительность в минутах")
-    notes: Optional[str] = Field(None, max_length=2000, description="Заметки")
-    contact_status: Optional[str] = Field(None, description="Новый статус контакта для студента")
-
-    @field_validator('communication_type')
-    @classmethod
-    def validate_communication_type(cls, v):
-        if v:
-            normalized = CommunicationType.normalize(v)
-            if normalized not in CommunicationType.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый тип коммуникации. Допустимые: {', '.join([t.lower() for t in CommunicationType.get_valid_values()])}")
-            return normalized
-        return v
-
-    @field_validator('status')
-    @classmethod
-    def validate_status(cls, v):
-        if v:
-            normalized = CommunicationStatus.normalize(v)
-            if normalized not in CommunicationStatus.get_valid_values():
-                raise ValueError(
-                    f"Недопустимый статус. Допустимые: {', '.join(CommunicationStatus.get_valid_values())}")
-            return normalized
-        return 'completed'
-
-    @field_validator('contact_status')
-    @classmethod
-    def validate_contact_status(cls, v):
-        if v:
-            normalized = ContactStatus.normalize(v)
-            if normalized not in ContactStatus.get_valid_values():
-                raise ValueError(f"Недопустимый статус контакта: {v}")
-            return normalized
-        return v
-
-
-class CommunicationUpdate(BaseModel):
-    communication_type: Optional[str] = None
-    status: Optional[str] = None
+    communication_type: str
+    status: Optional[str] = "completed"
     date_time: Optional[datetime] = None
-    duration_minutes: Optional[int] = Field(None, ge=1, le=480)
-    notes: Optional[str] = Field(None, max_length=2000)
+    duration_minutes: Optional[int] = None
+    notes: Optional[str] = None
+    contact_status: Optional[str] = None
 
     @field_validator('communication_type')
     @classmethod
@@ -520,7 +451,15 @@ class CommunicationUpdate(BaseModel):
             if normalized not in CommunicationStatus.get_valid_values():
                 raise ValueError(f"Недопустимый статус")
             return normalized
-        return v
+        return 'completed'
+
+
+class CommunicationUpdate(BaseModel):
+    communication_type: Optional[str] = None
+    status: Optional[str] = None
+    date_time: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    notes: Optional[str] = None
 
 
 class CommunicationResponse(BaseModel):
@@ -548,6 +487,8 @@ class CommunicationStatsResponse(BaseModel):
     period_days: int
 
 
+# ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+
 async def get_current_user_mobile(
         credentials: HTTPAuthorizationCredentials = Depends(security),
         db: Session = Depends(get_db)
@@ -571,6 +512,8 @@ async def get_current_user_web(
     return user
 
 
+# ==================== МОБИЛЬНЫЕ ЭНДПОИНТЫ (Bearer Token) ====================
+
 @router.get("", response_model=StudentListResponse)
 async def get_students_mobile(
         skip: int = Query(0, ge=0),
@@ -581,88 +524,25 @@ async def get_students_mobile(
         consent_status: Optional[bool] = None,
         department_id: Optional[int] = None,
         speciality_id: Optional[int] = None,
-        study_form: Optional[str] = Query(None, description="Форма обучения (Очная/Очно-заочная/Заочная)"),
-        study_basis: Optional[str] = Query(None, description="Основа обучения (Бюджетная/Платная/Целевая)"),
+        study_form: Optional[str] = None,
+        study_basis: Optional[str] = None,
         search: Optional[str] = None,
-        meeting_status: Optional[str] = Query(None, description="Статус встречи (MET/NOT_MET)"),
-        call_status: Optional[str] = Query(None, description="Статус дозвона (REACHED/NOT_REACHED)"),
-        decision_status: Optional[str] = Query(None, description="Статус решения (DECIDED/THINKING)"),
-        documents_status: Optional[str] = Query(None, description="Статус документов"),
+        meeting_status: Optional[str] = None,
+        call_status: Optional[str] = None,
+        decision_status: Optional[str] = None,
+        documents_status: Optional[str] = None,
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
 ):
     students = student_service.get_available_students(
-        user_id=current_user.id,
-        db=db,
-        skip=skip,
-        limit=limit,
-        status=status,
-        application_status=application_status,
-        contact_status=contact_status,
-        consent_status=consent_status,
-        department_id=department_id,
-        speciality_id=speciality_id,
-        study_form=study_form,
-        study_basis=study_basis,
-        search=search,
-        meeting_status=meeting_status,
-        call_status=call_status,
-        decision_status=decision_status,
-        documents_status=documents_status
+        user_id=current_user.id, db=db, skip=skip, limit=limit,
+        status=status, application_status=application_status, contact_status=contact_status,
+        consent_status=consent_status, department_id=department_id, speciality_id=speciality_id,
+        study_form=study_form, study_basis=study_basis, search=search,
+        meeting_status=meeting_status, call_status=call_status,
+        decision_status=decision_status, documents_status=documents_status
     )
-
-    return {
-        "total": len(students),
-        "students": students
-    }
-
-
-@router.get("/web", response_model=StudentListResponse)
-async def web_get_students(
-        request: Request,
-        skip: int = Query(0, ge=0),
-        limit: int = Query(100, ge=1, le=500),
-        status: Optional[str] = None,
-        application_status: Optional[str] = None,
-        contact_status: Optional[str] = None,
-        consent_status: Optional[bool] = None,
-        department_id: Optional[int] = None,
-        speciality_id: Optional[int] = None,
-        study_form: Optional[str] = Query(None, description="Форма обучения (Очная/Очно-заочная/Заочная)"),
-        study_basis: Optional[str] = Query(None, description="Основа обучения (Бюджетная/Платная/Целевая)"),
-        search: Optional[str] = None,
-        meeting_status: Optional[str] = Query(None, description="Статус встречи (MET/NOT_MET)"),
-        call_status: Optional[str] = Query(None, description="Статус дозвона (REACHED/NOT_REACHED)"),
-        decision_status: Optional[str] = Query(None, description="Статус решения (DECIDED/THINKING)"),
-        documents_status: Optional[str] = Query(None, description="Статус документов"),
-        db: Session = Depends(get_db)
-):
-    current_user = await get_current_user_web(request, db)
-
-    students = student_service.get_available_students(
-        user_id=current_user.id,
-        db=db,
-        skip=skip,
-        limit=limit,
-        status=status,
-        application_status=application_status,
-        contact_status=contact_status,
-        consent_status=consent_status,
-        department_id=department_id,
-        speciality_id=speciality_id,
-        study_form=study_form,
-        study_basis=study_basis,
-        search=search,
-        meeting_status=meeting_status,
-        call_status=call_status,
-        decision_status=decision_status,
-        documents_status=documents_status
-    )
-
-    return {
-        "total": len(students),
-        "students": students
-    }
+    return {"total": len(students), "students": students}
 
 
 @router.get("/{student_id}", response_model=StudentResponse)
@@ -671,35 +551,9 @@ async def get_student_mobile(
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
 ):
-    student = student_service.get_student_by_id(
-        student_id=student_id,
-        user_id=current_user.id,
-        db=db
-    )
-
+    student = student_service.get_student_by_id(student_id=student_id, user_id=current_user.id, db=db)
     if not student:
-        raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
-
-    return student
-
-
-@router.get("/web/{student_id}", response_model=StudentResponse)
-async def web_get_student(
-        request: Request,
-        student_id: int,
-        db: Session = Depends(get_db)
-):
-    current_user = await get_current_user_web(request, db)
-
-    student = student_service.get_student_by_id(
-        student_id=student_id,
-        user_id=current_user.id,
-        db=db
-    )
-
-    if not student:
-        raise HTTPException(status_code=404, detail="Абитуриент не найден или доступ запрещен")
-
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
     return student
 
 
@@ -717,28 +571,18 @@ async def get_student_applications_mobile(
     if user.role != UserRole.ADMIN and student.kurator_id != current_user.id:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
 
-    applications = db.query(StudentApplication).filter(
-        StudentApplication.student_id == student_id
-    ).all()
-
+    applications = db.query(StudentApplication).filter(StudentApplication.student_id == student_id).all()
     result = []
     for app in applications:
         department = db.query(Department).filter(Department.id == app.department_id).first()
         speciality = db.query(Speciality).filter(Speciality.id == app.speciality_id).first()
         profile = db.query(Profile).filter(Profile.id == app.profile_id).first() if app.profile_id else None
-
         result.append(StudentApplicationResponse(
-            id=app.id,
-            student_id=app.student_id,
-            department_id=app.department_id,
+            id=app.id, student_id=app.student_id, department_id=app.department_id,
             department_name=department.name if department else None,
-            speciality_id=app.speciality_id,
-            speciality_name=speciality.name if speciality else None,
-            profile_id=app.profile_id,
-            profile_name=profile.name if profile else None,
-            position=app.position,
-            priority=app.priority,
-            total_score=app.total_score,
+            speciality_id=app.speciality_id, speciality_name=speciality.name if speciality else None,
+            profile_id=app.profile_id, profile_name=profile.name if profile else None,
+            position=app.position, priority=app.priority, total_score=app.total_score,
             application_status=app.application_status.value if app.application_status else None,
             consent_status=app.consent_status if app.consent_status is not None else False,
             participation=app.participation if app.participation is not None else True,
@@ -746,263 +590,49 @@ async def get_student_applications_mobile(
             study_form=app.study_form.value if app.study_form else None,
             study_basis=app.study_basis.value if app.study_basis else None,
             study_level=app.study_level.value if app.study_level else None,
-            budget_places_total=app.budget_places_total,
-            budget_places_filled=app.budget_places_filled,
-            paid_places_total=app.paid_places_total,
-            paid_places_filled=app.paid_places_filled,
-            target_places_total=app.target_places_total,
-            target_places_filled=app.target_places_filled,
-            created_at=app.created_at,
-            updated_at=app.updated_at
+            budget_places_total=app.budget_places_total, budget_places_filled=app.budget_places_filled,
+            paid_places_total=app.paid_places_total, paid_places_filled=app.paid_places_filled,
+            target_places_total=app.target_places_total, target_places_filled=app.target_places_filled,
+            created_at=app.created_at, updated_at=app.updated_at
         ))
-
     return result
 
 
-@router.get("/web/{student_id}/applications", response_model=List[StudentApplicationResponse])
-async def web_get_student_applications(
-        request: Request,
+@router.get("/{student_id}/communications", response_model=List[CommunicationResponse])
+async def get_student_communications_mobile(
         student_id: int,
-        db: Session = Depends(get_db)
-):
-    current_user = await get_current_user_web(request, db)
-
-    student = db.query(Student).filter(Student.id == student_id).first()
-    if not student:
-        raise HTTPException(status_code=404, detail="Абитуриент не найден")
-
-    user = db.query(User).filter(User.id == current_user.id).first()
-    if user.role != UserRole.ADMIN and student.kurator_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Доступ запрещен")
-
-    applications = db.query(StudentApplication).filter(
-        StudentApplication.student_id == student_id
-    ).all()
-
-    result = []
-    for app in applications:
-        department = db.query(Department).filter(Department.id == app.department_id).first()
-        speciality = db.query(Speciality).filter(Speciality.id == app.speciality_id).first()
-        profile = db.query(Profile).filter(Profile.id == app.profile_id).first() if app.profile_id else None
-
-        result.append(StudentApplicationResponse(
-            id=app.id,
-            student_id=app.student_id,
-            department_id=app.department_id,
-            department_name=department.name if department else None,
-            speciality_id=app.speciality_id,
-            speciality_name=speciality.name if speciality else None,
-            profile_id=app.profile_id,
-            profile_name=profile.name if profile else None,
-            position=app.position,
-            priority=app.priority,
-            total_score=app.total_score,
-            application_status=app.application_status.value if app.application_status else None,
-            consent_status=app.consent_status if app.consent_status is not None else False,
-            participation=app.participation if app.participation is not None else True,
-            is_main_contest=app.is_main_contest if app.is_main_contest is not None else False,
-            study_form=app.study_form.value if app.study_form else None,
-            study_basis=app.study_basis.value if app.study_basis else None,
-            study_level=app.study_level.value if app.study_level else None,
-            budget_places_total=app.budget_places_total,
-            budget_places_filled=app.budget_places_filled,
-            paid_places_total=app.paid_places_total,
-            paid_places_filled=app.paid_places_filled,
-            target_places_total=app.target_places_total,
-            target_places_filled=app.target_places_filled,
-            created_at=app.created_at,
-            updated_at=app.updated_at
-        ))
-
-    return result
-
-
-@router.get("/statistics/groups", response_model=List[GroupStatisticsResponse])
-async def get_group_statistics_mobile(
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
 ):
-    from services.parser_service import GROUPS_CONFIG
+    student = student_service.get_student_by_id(student_id=student_id, user_id=current_user.id, db=db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
 
-    results = []
-
-    for group_config in GROUPS_CONFIG:
-        department = db.query(Department).filter(
-            Department.name == group_config['department_name']
-        ).first()
-
-        if not department:
-            continue
-
-        speciality = db.query(Speciality).filter(
-            Speciality.name == group_config['speciality_name'],
-            Speciality.department_id == department.id
-        ).first()
-
-        if not speciality:
-            continue
-
-        profile = db.query(Profile).filter(
-            Profile.name == group_config['profile_name'],
-            Profile.speciality_id == speciality.id
-        ).first()
-
-        if not profile:
-            from services.parser_service import ParserService
-            parser = ParserService(db)
-            data = parser.fetch_group_data(group_config['uid'])
-            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
-            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
-            profile_id = None
-        else:
-            stats = {
-                "total_applications": profile.total_applications or 0,
-                "applications_submitted": profile.applications_submitted or 0,
-                "enrolled": profile.enrolled or 0,
-                "average_score": profile.average_score or 0,
-                "min_score": profile.min_score or 0,
-                "max_score": profile.max_score or 0,
-                "budget": {
-                    "total": profile.budget_places or 0,
-                    "filled": profile.budget_filled or 0,
-                    "free": profile.budget_free or 0,
-                    "applicants_in_range": profile.budget_applicants_in_range or 0,
-                    "applicants_with_consent": profile.budget_applicants_with_consent or 0,
-                    "passing_score": profile.budget_passing_score or 0
-                },
-                "paid": {
-                    "total": profile.paid_places or 0,
-                    "filled": profile.paid_filled or 0,
-                    "free": profile.paid_free or 0,
-                    "applicants_with_consent": profile.paid_applicants_with_consent or 0
-                },
-                "target": {
-                    "total": profile.target_places or 0,
-                    "filled": profile.target_filled or 0,
-                    "free": profile.target_free or 0,
-                    "applicants_with_consent": profile.target_applicants_with_consent or 0
-                },
-                "competition": profile.competition or 0,
-                "passing_score_current": profile.passing_score_current or 0,
-                "passing_score_last_year": profile.passing_score_last_year or 0
-            }
-            profile_id = profile.id
-
-        results.append(GroupStatisticsResponse(
-            group_name=group_config['name'],
-            profile_id=profile_id,
-            study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
-            study_basis=group_config.get('study_basis').value if group_config.get('study_basis') else None,
-            total_applications=stats['total_applications'],
-            applications_submitted=stats['applications_submitted'],
-            enrolled=stats['enrolled'],
-            average_score=stats['average_score'],
-            min_score=stats['min_score'],
-            max_score=stats['max_score'],
-            budget=stats['budget'],
-            paid=stats['paid'],
-            target=stats['target'],
-            competition=stats['competition'],
-            passing_score_current=stats['passing_score_current'],
-            passing_score_last_year=stats['passing_score_last_year']
-        ))
-
-    return results
+    communications = communication_service.get_student_communications(
+        student_id=student_id, user_id=current_user.id, db=db, limit=limit, offset=offset
+    )
+    return communications
 
 
-@router.get("/web/statistics/groups", response_model=List[GroupStatisticsResponse])
-async def web_get_group_statistics(
-        request: Request,
+@router.post("/{student_id}/communications", response_model=CommunicationResponse, status_code=201)
+async def create_student_communication_mobile(
+        student_id: int,
+        comm_data: CommunicationCreate,
+        current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
 ):
-    current_user = await get_current_user_web(request, db)
+    student = student_service.get_student_by_id(student_id=student_id, user_id=current_user.id, db=db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
 
-    from services.parser_service import GROUPS_CONFIG
-
-    results = []
-
-    for group_config in GROUPS_CONFIG:
-        department = db.query(Department).filter(
-            Department.name == group_config['department_name']
-        ).first()
-
-        if not department:
-            continue
-
-        speciality = db.query(Speciality).filter(
-            Speciality.name == group_config['speciality_name'],
-            Speciality.department_id == department.id
-        ).first()
-
-        if not speciality:
-            continue
-
-        profile = db.query(Profile).filter(
-            Profile.name == group_config['profile_name'],
-            Profile.speciality_id == speciality.id
-        ).first()
-
-        if not profile:
-            from services.parser_service import ParserService
-            parser = ParserService(db)
-            data = parser.fetch_group_data(group_config['uid'])
-            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
-            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
-            profile_id = None
-        else:
-            stats = {
-                "total_applications": profile.total_applications or 0,
-                "applications_submitted": profile.applications_submitted or 0,
-                "enrolled": profile.enrolled or 0,
-                "average_score": profile.average_score or 0,
-                "min_score": profile.min_score or 0,
-                "max_score": profile.max_score or 0,
-                "budget": {
-                    "total": profile.budget_places or 0,
-                    "filled": profile.budget_filled or 0,
-                    "free": profile.budget_free or 0,
-                    "applicants_in_range": profile.budget_applicants_in_range or 0,
-                    "applicants_with_consent": profile.budget_applicants_with_consent or 0,
-                    "passing_score": profile.budget_passing_score or 0
-                },
-                "paid": {
-                    "total": profile.paid_places or 0,
-                    "filled": profile.paid_filled or 0,
-                    "free": profile.paid_free or 0,
-                    "applicants_with_consent": profile.paid_applicants_with_consent or 0
-                },
-                "target": {
-                    "total": profile.target_places or 0,
-                    "filled": profile.target_filled or 0,
-                    "free": profile.target_free or 0,
-                    "applicants_with_consent": profile.target_applicants_with_consent or 0
-                },
-                "competition": profile.competition or 0,
-                "passing_score_current": profile.passing_score_current or 0,
-                "passing_score_last_year": profile.passing_score_last_year or 0
-            }
-            profile_id = profile.id
-
-        results.append(GroupStatisticsResponse(
-            group_name=group_config['name'],
-            profile_id=profile_id,
-            study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
-            study_basis=group_config.get('study_basis').value if group_config.get('study_basis') else None,
-            total_applications=stats['total_applications'],
-            applications_submitted=stats['applications_submitted'],
-            enrolled=stats['enrolled'],
-            average_score=stats['average_score'],
-            min_score=stats['min_score'],
-            max_score=stats['max_score'],
-            budget=stats['budget'],
-            paid=stats['paid'],
-            target=stats['target'],
-            competition=stats['competition'],
-            passing_score_current=stats['passing_score_current'],
-            passing_score_last_year=stats['passing_score_last_year']
-        ))
-
-    return results
+    full_data = comm_data.dict(exclude_unset=True)
+    full_data['student_id'] = student_id
+    result = communication_service.create_communication(
+        communication_data=full_data, user_id=current_user.id, db=db
+    )
+    return result
 
 
 @router.post("", response_model=StudentResponse, status_code=201)
@@ -1011,31 +641,7 @@ async def create_student_mobile(
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
 ):
-    try:
-        return student_service.create_student(
-            student_data.dict(exclude_unset=True),
-            user_id=current_user.id,
-            db=db
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.post("/web", response_model=StudentResponse, status_code=201)
-async def web_create_student(
-        request: Request,
-        student_data: StudentCreate,
-        db: Session = Depends(get_db)
-):
-    try:
-        current_user = await get_current_user_web(request, db)
-        return student_service.create_student(
-            student_data.dict(exclude_unset=True),
-            user_id=current_user.id,
-            db=db
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    return student_service.create_student(student_data.dict(exclude_unset=True), user_id=current_user.id, db=db)
 
 
 @router.put("/{student_id}", response_model=StudentResponse)
@@ -1045,22 +651,228 @@ async def update_student_mobile(
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
 ):
-    try:
-        student = student_service.update_student(
-            student_id=student_id,
-            update_data=student_data.dict(exclude_unset=True),
-            user_id=current_user.id,
-            db=db
-        )
+    student = student_service.update_student(
+        student_id=student_id, update_data=student_data.dict(exclude_unset=True),
+        user_id=current_user.id, db=db
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+    return student
 
-        if not student:
-            raise HTTPException(status_code=404, detail="Абитуриент не найден")
 
-        return student
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@router.delete("/{student_id}")
+async def delete_student_mobile(
+        student_id: int,
+        current_user: User = Depends(get_current_user_mobile),
+        db: Session = Depends(get_db)
+):
+    deleted = student_service.delete_student(student_id=student_id, user_id=current_user.id, db=db)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+    return {"message": "Абитуриент успешно удален"}
+
+
+@router.get("/statistics/groups", response_model=List[GroupStatisticsResponse])
+async def get_group_statistics_mobile(
+        current_user: User = Depends(get_current_user_mobile),
+        db: Session = Depends(get_db)
+):
+    from services.parser_service import GROUPS_CONFIG
+    results = []
+    for group_config in GROUPS_CONFIG:
+        department = db.query(Department).filter(Department.name == group_config['department_name']).first()
+        if not department:
+            continue
+        speciality = db.query(Speciality).filter(
+            Speciality.name == group_config['speciality_name'],
+            Speciality.department_id == department.id
+        ).first()
+        if not speciality:
+            continue
+        profile = db.query(Profile).filter(
+            Profile.name == group_config['profile_name'],
+            Profile.speciality_id == speciality.id
+        ).first()
+        if not profile:
+            from services.parser_service import ParserService
+            parser = ParserService(db)
+            data = parser.fetch_group_data(group_config['uid'])
+            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
+            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
+            profile_id = None
+        else:
+            stats = {
+                "total_applications": profile.total_applications or 0,
+                "applications_submitted": profile.applications_submitted or 0,
+                "enrolled": profile.enrolled or 0,
+                "average_score": profile.average_score or 0,
+                "min_score": profile.min_score or 0,
+                "max_score": profile.max_score or 0,
+                "budget": {"total": profile.budget_places or 0, "filled": profile.budget_filled or 0,
+                           "free": profile.budget_free or 0,
+                           "applicants_in_range": profile.budget_applicants_in_range or 0,
+                           "applicants_with_consent": profile.budget_applicants_with_consent or 0,
+                           "passing_score": profile.budget_passing_score or 0},
+                "paid": {"total": profile.paid_places or 0, "filled": profile.paid_filled or 0,
+                         "free": profile.paid_free or 0,
+                         "applicants_with_consent": profile.paid_applicants_with_consent or 0},
+                "target": {"total": profile.target_places or 0, "filled": profile.target_filled or 0,
+                           "free": profile.target_free or 0,
+                           "applicants_with_consent": profile.target_applicants_with_consent or 0},
+                "competition": profile.competition or 0,
+                "passing_score_current": profile.passing_score_current or 0,
+                "passing_score_last_year": profile.passing_score_last_year or 0
+            }
+            profile_id = profile.id
+        results.append(GroupStatisticsResponse(
+            group_name=group_config['name'], profile_id=profile_id,
+            study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
+            study_basis=group_config.get('study_basis').value if group_config.get('study_basis') else None,
+            total_applications=stats['total_applications'], applications_submitted=stats['applications_submitted'],
+            enrolled=stats['enrolled'], average_score=stats['average_score'], min_score=stats['min_score'],
+            max_score=stats['max_score'], budget=stats['budget'], paid=stats['paid'], target=stats['target'],
+            competition=stats['competition'], passing_score_current=stats['passing_score_current'],
+            passing_score_last_year=stats['passing_score_last_year']
+        ))
+    return results
+
+
+# ==================== ВЕБ-ЭНДПОИНТЫ (Cookie) ====================
+
+@router.get("/web", response_model=StudentListResponse)
+async def web_get_students(
+        request: Request,
+        skip: int = Query(0, ge=0),
+        limit: int = Query(100, ge=1, le=500),
+        status: Optional[str] = None,
+        application_status: Optional[str] = None,
+        contact_status: Optional[str] = None,
+        consent_status: Optional[bool] = None,
+        department_id: Optional[int] = None,
+        speciality_id: Optional[int] = None,
+        study_form: Optional[str] = None,
+        study_basis: Optional[str] = None,
+        search: Optional[str] = None,
+        meeting_status: Optional[str] = None,
+        call_status: Optional[str] = None,
+        decision_status: Optional[str] = None,
+        documents_status: Optional[str] = None,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    students = student_service.get_available_students(
+        user_id=current_user.id, db=db, skip=skip, limit=limit,
+        status=status, application_status=application_status, contact_status=contact_status,
+        consent_status=consent_status, department_id=department_id, speciality_id=speciality_id,
+        study_form=study_form, study_basis=study_basis, search=search,
+        meeting_status=meeting_status, call_status=call_status,
+        decision_status=decision_status, documents_status=documents_status
+    )
+    return {"total": len(students), "students": students}
+
+
+@router.get("/web/{student_id}", response_model=StudentResponse)
+async def web_get_student(
+        request: Request,
+        student_id: int,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    student = student_service.get_student_by_id(student_id=student_id, user_id=current_user.id, db=db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+    return student
+
+
+@router.get("/web/{student_id}/applications", response_model=List[StudentApplicationResponse])
+async def web_get_student_applications(
+        request: Request,
+        student_id: int,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    student = db.query(Student).filter(Student.id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if user.role != UserRole.ADMIN and student.kurator_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+
+    applications = db.query(StudentApplication).filter(StudentApplication.student_id == student_id).all()
+    result = []
+    for app in applications:
+        department = db.query(Department).filter(Department.id == app.department_id).first()
+        speciality = db.query(Speciality).filter(Speciality.id == app.speciality_id).first()
+        profile = db.query(Profile).filter(Profile.id == app.profile_id).first() if app.profile_id else None
+        result.append(StudentApplicationResponse(
+            id=app.id, student_id=app.student_id, department_id=app.department_id,
+            department_name=department.name if department else None,
+            speciality_id=app.speciality_id, speciality_name=speciality.name if speciality else None,
+            profile_id=app.profile_id, profile_name=profile.name if profile else None,
+            position=app.position, priority=app.priority, total_score=app.total_score,
+            application_status=app.application_status.value if app.application_status else None,
+            consent_status=app.consent_status if app.consent_status is not None else False,
+            participation=app.participation if app.participation is not None else True,
+            is_main_contest=app.is_main_contest if app.is_main_contest is not None else False,
+            study_form=app.study_form.value if app.study_form else None,
+            study_basis=app.study_basis.value if app.study_basis else None,
+            study_level=app.study_level.value if app.study_level else None,
+            budget_places_total=app.budget_places_total, budget_places_filled=app.budget_places_filled,
+            paid_places_total=app.paid_places_total, paid_places_filled=app.paid_places_filled,
+            target_places_total=app.target_places_total, target_places_filled=app.target_places_filled,
+            created_at=app.created_at, updated_at=app.updated_at
+        ))
+    return result
+
+
+@router.get("/web/{student_id}/communications", response_model=List[CommunicationResponse])
+async def web_get_student_communications(
+        request: Request,
+        student_id: int,
+        limit: int = Query(50, ge=1, le=200),
+        offset: int = Query(0, ge=0),
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    student = student_service.get_student_by_id(student_id=student_id, user_id=current_user.id, db=db)
+    if not student:
+        return []
+
+    communications = communication_service.get_student_communications(
+        student_id=student_id, user_id=current_user.id, db=db, limit=limit, offset=offset
+    )
+    return communications
+
+
+@router.post("/web/{student_id}/communications", response_model=CommunicationResponse, status_code=201)
+async def web_create_student_communication(
+        request: Request,
+        student_id: int,
+        comm_data: CommunicationCreate,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    student = student_service.get_student_by_id(student_id=student_id, user_id=current_user.id, db=db)
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+
+    full_data = comm_data.dict(exclude_unset=True)
+    full_data['student_id'] = student_id
+    result = communication_service.create_communication(
+        communication_data=full_data, user_id=current_user.id, db=db
+    )
+    return result
+
+
+@router.post("/web", response_model=StudentResponse, status_code=201)
+async def web_create_student(
+        request: Request,
+        student_data: StudentCreate,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    return student_service.create_student(student_data.dict(exclude_unset=True), user_id=current_user.id, db=db)
 
 
 @router.put("/web/{student_id}", response_model=StudentResponse)
@@ -1070,44 +882,14 @@ async def web_update_student(
         student_data: StudentUpdate,
         db: Session = Depends(get_db)
 ):
-    try:
-        current_user = await get_current_user_web(request, db)
-        student = student_service.update_student(
-            student_id=student_id,
-            update_data=student_data.dict(exclude_unset=True),
-            user_id=current_user.id,
-            db=db
-        )
-
-        if not student:
-            raise HTTPException(status_code=404, detail="Абитуриент не найден")
-
-        return student
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/{student_id}")
-async def delete_student_mobile(
-        student_id: int,
-        current_user: User = Depends(get_current_user_mobile),
-        db: Session = Depends(get_db)
-):
-    try:
-        deleted = student_service.delete_student(
-            student_id=student_id,
-            user_id=current_user.id,
-            db=db
-        )
-
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Абитуриент не найден")
-
-        return {"message": "Абитуриент успешно удален"}
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+    current_user = await get_current_user_web(request, db)
+    student = student_service.update_student(
+        student_id=student_id, update_data=student_data.dict(exclude_unset=True),
+        user_id=current_user.id, db=db
+    )
+    if not student:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+    return student
 
 
 @router.delete("/web/{student_id}")
@@ -1116,17 +898,118 @@ async def web_delete_student(
         student_id: int,
         db: Session = Depends(get_db)
 ):
-    try:
-        current_user = await get_current_user_web(request, db)
-        deleted = student_service.delete_student(
-            student_id=student_id,
-            user_id=current_user.id,
-            db=db
-        )
+    current_user = await get_current_user_web(request, db)
+    deleted = student_service.delete_student(student_id=student_id, user_id=current_user.id, db=db)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Абитуриент не найден")
+    return {"message": "Абитуриент успешно удален"}
 
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Абитуриент не найден")
 
-        return {"message": "Абитуриент успешно удален"}
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+@router.get("/web/statistics/groups", response_model=List[GroupStatisticsResponse])
+async def web_get_group_statistics(
+        request: Request,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    from services.parser_service import GROUPS_CONFIG
+    results = []
+    for group_config in GROUPS_CONFIG:
+        department = db.query(Department).filter(Department.name == group_config['department_name']).first()
+        if not department:
+            continue
+        speciality = db.query(Speciality).filter(
+            Speciality.name == group_config['speciality_name'],
+            Speciality.department_id == department.id
+        ).first()
+        if not speciality:
+            continue
+        profile = db.query(Profile).filter(
+            Profile.name == group_config['profile_name'],
+            Profile.speciality_id == speciality.id
+        ).first()
+        if not profile:
+            from services.parser_service import ParserService
+            parser = ParserService(db)
+            data = parser.fetch_group_data(group_config['uid'])
+            api_data = data.get('data', []) if data and data.get('state') == 'ok' else []
+            stats = parser.calculate_statistics_from_api_data(group_config, api_data)
+            profile_id = None
+        else:
+            stats = {
+                "total_applications": profile.total_applications or 0,
+                "applications_submitted": profile.applications_submitted or 0,
+                "enrolled": profile.enrolled or 0,
+                "average_score": profile.average_score or 0,
+                "min_score": profile.min_score or 0,
+                "max_score": profile.max_score or 0,
+                "budget": {"total": profile.budget_places or 0, "filled": profile.budget_filled or 0,
+                           "free": profile.budget_free or 0,
+                           "applicants_in_range": profile.budget_applicants_in_range or 0,
+                           "applicants_with_consent": profile.budget_applicants_with_consent or 0,
+                           "passing_score": profile.budget_passing_score or 0},
+                "paid": {"total": profile.paid_places or 0, "filled": profile.paid_filled or 0,
+                         "free": profile.paid_free or 0,
+                         "applicants_with_consent": profile.paid_applicants_with_consent or 0},
+                "target": {"total": profile.target_places or 0, "filled": profile.target_filled or 0,
+                           "free": profile.target_free or 0,
+                           "applicants_with_consent": profile.target_applicants_with_consent or 0},
+                "competition": profile.competition or 0,
+                "passing_score_current": profile.passing_score_current or 0,
+                "passing_score_last_year": profile.passing_score_last_year or 0
+            }
+            profile_id = profile.id
+        results.append(GroupStatisticsResponse(
+            group_name=group_config['name'], profile_id=profile_id,
+            study_form=group_config.get('study_form').value if group_config.get('study_form') else None,
+            study_basis=group_config.get('study_basis').value if group_config.get('study_basis') else None,
+            total_applications=stats['total_applications'], applications_submitted=stats['applications_submitted'],
+            enrolled=stats['enrolled'], average_score=stats['average_score'], min_score=stats['min_score'],
+            max_score=stats['max_score'], budget=stats['budget'], paid=stats['paid'], target=stats['target'],
+            competition=stats['competition'], passing_score_current=stats['passing_score_current'],
+            passing_score_last_year=stats['passing_score_last_year']
+        ))
+    return results
+
+
+@router.put("/web/communications/{comm_id}", response_model=CommunicationResponse)
+async def web_update_communication(
+        request: Request,
+        comm_id: int,
+        comm_data: CommunicationUpdate,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    communication = communication_service.update_communication(
+        communication_id=comm_id, update_data=comm_data.dict(exclude_unset=True),
+        user_id=current_user.id, db=db
+    )
+    if not communication:
+        raise HTTPException(status_code=404, detail="Коммуникация не найдена")
+    return communication
+
+
+@router.delete("/web/communications/{comm_id}")
+async def web_delete_communication(
+        request: Request,
+        comm_id: int,
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    deleted = communication_service.delete_communication(
+        communication_id=comm_id, user_id=current_user.id, db=db
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Коммуникация не найдена")
+    return {"message": "Коммуникация успешно удалена"}
+
+
+@router.get("/web/communications/stats", response_model=CommunicationStatsResponse)
+async def web_get_communication_stats(
+        request: Request,
+        days_back: int = Query(30, ge=1, le=365),
+        db: Session = Depends(get_db)
+):
+    current_user = await get_current_user_web(request, db)
+    return communication_service.get_communication_stats(
+        user_id=current_user.id, db=db, days_back=days_back
+    )
