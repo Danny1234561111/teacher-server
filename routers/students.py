@@ -574,6 +574,7 @@ async def web_get_students(
 
     query = db.query(Student)
 
+    # Применяем фильтры
     if search:
         query = query.filter(Student.full_name.ilike(f"%{search}%"))
 
@@ -584,25 +585,71 @@ async def web_get_students(
         query = query.filter(Student.speciality_id == speciality_id)
 
     if status:
-        status_lower = status.lower()
-        if status_lower == 'active':
-            query = query.filter(Student.status == 'active')
-        elif status_lower == 'inactive':
-            query = query.filter(Student.status == 'inactive')
-        elif status_lower == 'enrolled':
-            query = query.filter(Student.status == 'enrolled')
+        try:
+            query = query.filter(Student.status == StudentStatus(status.lower()))
+        except ValueError:
+            pass
 
     if meeting_status:
-        query = query.filter(Student.meeting_status == meeting_status.upper())
+        try:
+            query = query.filter(Student.meeting_status == MeetingStatus(meeting_status.upper()))
+        except ValueError:
+            pass
 
     if call_status:
-        query = query.filter(Student.call_status == call_status.upper())
+        try:
+            query = query.filter(Student.call_status == CallStatus(call_status.upper()))
+        except ValueError:
+            pass
 
     if decision_status:
-        query = query.filter(Student.decision_status == decision_status.upper())
+        try:
+            query = query.filter(Student.decision_status == DecisionStatus(decision_status.upper()))
+        except ValueError:
+            pass
 
     if documents_status:
-        query = query.filter(Student.documents_status == documents_status.upper())
+        try:
+            query = query.filter(Student.documents_status == DocumentsStatus(documents_status.upper()))
+        except ValueError:
+            pass
+
+    if contact_status:
+        try:
+            query = query.filter(Student.contact_status == ContactStatus(contact_status.upper()))
+        except ValueError:
+            pass
+
+    if application_status or consent_status or study_form or study_basis:
+        query = query.join(StudentApplication, Student.id == StudentApplication.student_id)
+
+        if application_status:
+            try:
+                query = query.filter(
+                    StudentApplication.application_status == ApplicationStatus(application_status.lower()))
+            except ValueError:
+                pass
+
+        if consent_status is not None:
+            query = query.filter(StudentApplication.consent_status == consent_status)
+
+        if study_form:
+            try:
+                query = query.filter(StudentApplication.study_form == StudyForm(study_form))
+            except ValueError:
+                pass
+
+        if study_basis:
+            try:
+                query = query.filter(StudentApplication.study_basis == StudyBasis(study_basis))
+            except ValueError:
+                pass
+
+        query = query.distinct()
+
+    # Если не было join с заявлениями, но нужны фильтры по согласию
+    elif consent_status is not None:
+        query = query.join(StudentApplication).filter(StudentApplication.consent_status == consent_status).distinct()
 
     total = query.count()
     students_list = query.offset(skip).limit(limit).all()
@@ -619,13 +666,17 @@ async def web_get_students(
             spec = db.query(Speciality).filter(Speciality.id == s.speciality_id).first()
             speciality_name = spec.name if spec else None
 
+        main_application = db.query(StudentApplication).filter(
+            StudentApplication.student_id == s.id
+        ).order_by(StudentApplication.priority.asc(), StudentApplication.id.asc()).first()
+
         result.append(StudentResponse(
             id=s.id,
             russian_student_id=s.russian_student_id,
             full_name=s.full_name,
             phone=s.phone,
             additional_contacts=s.additional_contacts,
-            prior_contact=s.prior_contact,
+            prior_contact=s.prior_contact.value if s.prior_contact else None,
             department_id=s.department_id,
             department_name=department_name,
             speciality_id=s.speciality_id,
@@ -635,13 +686,13 @@ async def web_get_students(
             study_level=s.study_level.value if s.study_level else None,
             study_form=s.study_form.value if s.study_form else None,
             study_basis=s.study_basis.value if s.study_basis else None,
-            status=s.status,
-            application_status=s.application_status.value if s.application_status else None,
+            status=s.status.value if s.status else None,
+            application_status=main_application.application_status.value if main_application and main_application.application_status else None,
             contact_status=s.contact_status.value if s.contact_status else None,
-            contact_type=s.contact_type,
-            consent_status=s.consent_status,
-            total_score=s.total_score,
-            position=None,
+            contact_type=s.contact_type.value if s.contact_type else None,
+            consent_status=main_application.consent_status if main_application else None,
+            total_score=main_application.total_score if main_application else None,
+            position=main_application.position if main_application else None,
             last_communication=s.last_communication_date,
             last_communication_note=None,
             kurator_id=s.kurator_id,
@@ -654,6 +705,8 @@ async def web_get_students(
         ))
 
     return {"total": total, "students": result}
+
+
 
 
 @router.get("/web/{student_id}", response_model=StudentResponse)
