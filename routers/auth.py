@@ -1,7 +1,6 @@
-# api/routes/auth.py
 from fastapi import APIRouter, HTTPException, Depends, Response, Request
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 
 from services.auth_service import AuthService
@@ -40,8 +39,8 @@ class LogoutResponse(BaseModel):
     message: str
 
 
-@router.post("/mobile/login", response_model=AuthResponse)
-async def mobile_login(login_data: LoginRequest, db: Session = Depends(get_db)):
+@router.post("/login", response_model=AuthResponse)
+async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     try:
         result = auth_service.login_for_mobile(
             email=login_data.email,
@@ -56,8 +55,8 @@ async def mobile_login(login_data: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="Внутренняя ошибка сервера")
 
 
-@router.get("/mobile/me", response_model=UserResponse)
-async def mobile_get_current_user(token: str, db: Session = Depends(get_db)):
+@router.get("/me", response_model=UserResponse)
+async def get_current_user(token: str, db: Session = Depends(get_db)):
     try:
         user = auth_service.get_user_by_token(token, db)
         return user

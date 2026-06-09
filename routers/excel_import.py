@@ -53,7 +53,7 @@ async def get_current_user_web(
     return user
 
 
-@router.post("/mobile/upload", response_model=ExcelImportResponse)
+@router.post("/upload", response_model=ExcelImportResponse)
 async def mobile_import_students_from_excel(
         file: UploadFile = File(..., description="Excel файл с данными абитуриентов"),
         create_missing_profiles: bool = Form(False),

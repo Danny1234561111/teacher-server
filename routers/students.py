@@ -665,7 +665,7 @@ async def web_get_students(
     }
 
 
-@router.get("/mobile/{student_id}", response_model=StudentResponse)
+@router.get("/{student_id}", response_model=StudentResponse)
 async def mobile_get_student(
         student_id: int,
         current_user: User = Depends(get_current_user_mobile),
@@ -703,7 +703,7 @@ async def web_get_student(
     return student
 
 
-@router.get("/mobile/{student_id}/applications", response_model=List[StudentApplicationResponse])
+@router.get("/{student_id}/applications", response_model=List[StudentApplicationResponse])
 async def mobile_get_student_applications(
         student_id: int,
         current_user: User = Depends(get_current_user_mobile),
@@ -817,7 +817,7 @@ async def web_get_student_applications(
     return result
 
 
-@router.get("/mobile/statistics/groups", response_model=List[GroupStatisticsResponse])
+@router.get("/statistics/groups", response_model=List[GroupStatisticsResponse])
 async def mobile_get_group_statistics(
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
@@ -1038,7 +1038,7 @@ async def web_create_student(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@router.put("/mobile/{student_id}", response_model=StudentResponse)
+@router.put("/{student_id}", response_model=StudentResponse)
 async def mobile_update_student(
         student_id: int,
         student_data: StudentUpdate,
@@ -1089,7 +1089,7 @@ async def web_update_student(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/mobile/{student_id}")
+@router.delete("/{student_id}")
 async def mobile_delete_student(
         student_id: int,
         current_user: User = Depends(get_current_user_mobile),

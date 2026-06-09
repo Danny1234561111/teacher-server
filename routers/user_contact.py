@@ -175,7 +175,7 @@ def determine_target_device(contact_type: str, user: User) -> str:
     return settings_map.get(contact_type, 'pc')
 
 
-@router.post("/mobile/active/set", response_model=ActiveContactResponse)
+@router.post("/active/set", response_model=ActiveContactResponse)
 async def mobile_set_active_contact(
         contact_data: ActiveContactUpdate,
         current_user: User = Depends(get_current_user_mobile),
@@ -231,7 +231,7 @@ async def web_set_active_contact(
     )
 
 
-@router.get("/mobile/active/get", response_model=Optional[ActiveContactResponse])
+@router.get("/active/get", response_model=Optional[ActiveContactResponse])
 async def mobile_get_active_contact(
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
@@ -263,7 +263,7 @@ async def web_get_active_contact(
     )
 
 
-@router.delete("/mobile/active/delete")
+@router.delete("/active/delete")
 async def mobile_delete_active_contact(
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
@@ -291,7 +291,7 @@ async def web_delete_active_contact(
     return {"message": "Активный контакт удален"}
 
 
-@router.post("/mobile/active/use")
+@router.post("/active/use")
 async def mobile_use_active_contact(
         student_id: int,
         current_user: User = Depends(get_current_user_mobile),
@@ -465,7 +465,7 @@ async def web_use_active_contact(
         )
 
 
-@router.get("/mobile/settings", response_model=CommunicationSettingsResponse)
+@router.get("/settings", response_model=CommunicationSettingsResponse)
 async def mobile_get_communication_settings(
         current_user: User = Depends(get_current_user_mobile),
         db: Session = Depends(get_db)
@@ -494,7 +494,7 @@ async def web_get_communication_settings(
     )
 
 
-@router.put("/mobile/settings", response_model=CommunicationSettingsResponse)
+@router.put("/settings", response_model=CommunicationSettingsResponse)
 async def mobile_update_communication_settings(
         settings: CommunicationSettingsUpdate,
         current_user: User = Depends(get_current_user_mobile),
@@ -543,7 +543,7 @@ async def web_update_communication_settings(
     )
 
 
-@router.post("/mobile/call", response_model=CommunicationResponse)
+@router.post("/call", response_model=CommunicationResponse)
 async def mobile_make_call(
         request_data: CallRequest,
         current_user: User = Depends(get_current_user_mobile),
