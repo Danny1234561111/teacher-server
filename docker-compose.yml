@@ -41,8 +41,6 @@ services:
 
 volumes:
   postgres_data:
-    # Для локальной разработки - создается автоматически
-    # Для сервера - будем использовать external
 
 networks:
   app-network:

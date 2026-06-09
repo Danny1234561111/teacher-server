@@ -3,6 +3,7 @@ from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+import os
 
 # Импортируем роутеры
 from routers import auth, admin, students, user_contact
@@ -17,6 +18,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 auth_service = AuthService()
+
+ALLOWED_ORIGINS = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:3000,http://localhost:5173,http://localhost:8080,http://158.160.67.3:3000,http://158.160.67.3:5173"
+).split(",")
 
 
 @asynccontextmanager
@@ -57,10 +63,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS - настройки
+# CORS - настройки для поддержки cookies
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -71,7 +77,7 @@ app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(admin.router, prefix="/api/admin", tags=["Administration"])
 app.include_router(students.router, prefix="/api/students", tags=["Students"])
 app.include_router(user_contact.router, prefix="/api/user/contact", tags=["User Contact"])
-app.include_router(excel_import.router,prefix="/api/excel-import",)
+app.include_router(excel_import.router, prefix="/api/excel-import", tags=["Excel Import"])
 
 
 # ===== WEBSOCKET ЭНДПОИНТ =====
@@ -104,6 +110,10 @@ async def root():
         "version": "5.0.0",
         "status": "running",
         "database": "initialized",
+        "cors": {
+            "allowed_origins": ALLOWED_ORIGINS,
+            "credentials_supported": True
+        },
         "websocket": {
             "mobile": "ws://localhost:8000/ws/mobile/{token}"
         },
