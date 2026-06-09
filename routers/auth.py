@@ -7,7 +7,7 @@ from typing import Optional
 from database.database import get_db
 from services.auth_service import AuthService
 
-router = APIRouter(prefix="/api/auth", tags=["Authentication"])
+router = APIRouter(tags=["Authentication"])
 security = HTTPBearer()
 auth_service = AuthService()
 
